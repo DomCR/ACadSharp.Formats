@@ -9,7 +9,7 @@ public class SvgExporter : Exporter, IMediaExporter
 {
 	public SvgConfiguration Configuration { get; set; } = new SvgConfiguration();
 
-	private readonly SvgXmlWriter _writer;
+	private SvgXmlWriter _writer;
 
 	public SvgExporter(string filename)
 		: this(File.Create(filename))
@@ -19,6 +19,31 @@ public class SvgExporter : Exporter, IMediaExporter
 	public SvgExporter(Stream stream)
 		: base(stream)
 	{
+	}
+
+	public void Export(Layout layout)
+	{
+		this.createWriter();
+
+		this._writer.WriteLayout(layout);
+	}
+
+	public override void Export(BlockRecord record)
+	{
+		this.createWriter();
+
+		this._writer.WriteBlock(record);
+	}
+
+	public override void Export(CadDocument document)
+	{
+		this.createWriter();
+
+		this._writer.WriteBlock(document.ModelSpace);
+	}
+
+	private void createWriter()
+	{
 		StreamWriter textWriter = new StreamWriter(this._stream);
 		this._writer = new SvgXmlWriter(this._stream, this.Configuration)
 		{
@@ -26,20 +51,5 @@ public class SvgExporter : Exporter, IMediaExporter
 		};
 
 		this._writer.OnNotification += this.triggerNotification;
-	}
-
-	public void Export(Layout layout)
-	{
-		this._writer.WriteLayout(layout);
-	}
-
-	public override void Export(BlockRecord record)
-	{
-		throw new System.NotImplementedException();
-	}
-
-	public override void Export(CadDocument document)
-	{
-		throw new System.NotImplementedException();
 	}
 }
