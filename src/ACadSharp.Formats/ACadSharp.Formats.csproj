@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFrameworks>net5.0;net6.0;net7.0;net8.0;net9.0;net48;netstandard2.1;netstandard2.0</TargetFrameworks>
+		<Authors>DomCr</Authors>
+		<PackageId>ACadSharp.Formats</PackageId>
+		<PackageTags>C# Dwg Dxf Json Svg Pdf</PackageTags>
+		<RepositoryUrl>https://github.com/DomCR/ACadSharp.Formats</RepositoryUrl>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<RepositoryType>git</RepositoryType>
+		<PackageProjectUrl>https://github.com/DomCR/ACadSharp.Formats</PackageProjectUrl>
+		<Copyright>Copyright (c) 2026 Albert Domenech</Copyright>
+		<Description>Extension library for ACadSharp to export a dwg/dxf document into different media formats.</Description>
+		<GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release'">True</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<Version>1.0.0</Version>
+		<PackageOutputPath>../nupkg</PackageOutputPath>
+		<SignAssembly>True</SignAssembly>
+		<AssemblyOriginatorKeyFile>../ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
+	</PropertyGroup>
+	
+	<ItemGroup>
+	  <PackageReference Include="ACadSharp" Version="3.5.*" />
+	</ItemGroup>
+
+	<Import Project="..\CSUtilities\CSUtilities\CSUtilities.projitems" Label="Shared" />
+
+</Project>
