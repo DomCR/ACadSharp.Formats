@@ -1,6 +1,7 @@
 ﻿#if NET
 using ACadSharp.Entities;
 using ACadSharp.Formats.Json.Converters;
+using System.Linq;
 using System.Text.Json;
 
 namespace ACadSharp.Formats.Json;
@@ -15,7 +16,10 @@ public class JsonExporter
 			options = new JsonSerializerOptions();
 		}
 
-		options.Converters.Add(new CadConverterFactory());
+		if (!options.Converters.OfType<CadConverterFactory>().Any())
+		{
+			options.Converters.Add(new CadConverterFactory());
+		}
 
 		return JsonSerializer.Serialize(obj, obj.GetType(), options);
 	}

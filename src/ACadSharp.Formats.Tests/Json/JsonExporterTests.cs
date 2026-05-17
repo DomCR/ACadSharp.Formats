@@ -16,7 +16,11 @@ public class JsonExporterTests
 	{
 		Line line = new Line(new XYZ(0, 0, 0), new XYZ(10, 10, 0));
 
-		string json = JsonExporter.Serialize(line);
+		string json = JsonExporter.Serialize(line, new JsonSerializerOptions
+		{
+			IgnoreReadOnlyProperties = true,
+			IgnoreReadOnlyFields = true,
+		});
 
 		JsonObject obj = JsonNode.Parse(json).AsObject();
 
