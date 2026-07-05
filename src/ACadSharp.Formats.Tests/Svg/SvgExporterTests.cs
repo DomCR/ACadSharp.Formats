@@ -4,7 +4,7 @@ using Xunit.Abstractions;
 
 namespace ACadSharp.Formats.Tests.Svg;
 
-public class SvgExporterTests : CommonMediaExporterTests<SvgExporter>
+public class SvgExporterTests : CommonExporterTests<SvgExporter>
 {
 	protected readonly SvgConfiguration _svgConfiguration = new SvgConfiguration
 	{

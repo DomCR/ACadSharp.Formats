@@ -4,7 +4,7 @@ using Xunit.Abstractions;
 
 namespace ACadSharp.Formats.Tests.Pdf;
 
-public class PdfExporterTests : CommonMediaExporterTests<PdfExporter>
+public class PdfExporterTests : CommonExporterTests<PdfExporter>
 {
 	public PdfExporterTests(ITestOutputHelper output)
 		: base(output)

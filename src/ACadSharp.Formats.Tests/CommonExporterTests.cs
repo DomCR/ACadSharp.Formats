@@ -3,8 +3,8 @@ using Xunit.Abstractions;
 
 namespace ACadSharp.Formats.Tests;
 
-public abstract class CommonMediaExporterTests<T>
-	where T : IMediaExporter
+public abstract class CommonExporterTests<T>
+	where T : IExporter
 {
 	public static CadDocument Document { get; }
 
@@ -12,7 +12,7 @@ public abstract class CommonMediaExporterTests<T>
 
 	protected readonly ITestOutputHelper _output;
 
-	static CommonMediaExporterTests()
+	static CommonExporterTests()
 	{
 		Document = TestUtils.GetDocument();
 
@@ -41,7 +41,7 @@ public abstract class CommonMediaExporterTests<T>
 
 	protected abstract T getExporter(string name);
 
-	protected CommonMediaExporterTests(ITestOutputHelper output)
+	protected CommonExporterTests(ITestOutputHelper output)
 	{
 		this._output = output;
 	}
