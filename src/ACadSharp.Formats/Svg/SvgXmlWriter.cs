@@ -235,9 +235,9 @@ internal class SvgXmlWriter : XmlTextWriter
 			this.WriteValue(" ");
 			this.WriteValue(vb.Min.Y.ToPixelSize(units));
 			this.WriteValue(" ");
-			this.WriteValue((vb.Width).ToPixelSize(units));
+			this.WriteValue((vb.LengthX).ToPixelSize(units));
 			this.WriteValue(" ");
-			this.WriteValue((vb.Height).ToPixelSize(units));
+			this.WriteValue((vb.LengthY).ToPixelSize(units));
 			this.WriteEndAttribute();
 		}
 
@@ -597,8 +597,8 @@ internal class SvgXmlWriter : XmlTextWriter
 		}
 
 		string id = this.writePatternHeader(hatch);
-		var width = patterns.Values.Max(w => w.Width);
-		var height = patterns.Values.Max(w => w.Height);
+		var width = patterns.Values.Max(w => w.LengthX);
+		var height = patterns.Values.Max(w => w.LengthY);
 
 		this.WriteAttributeString("width", width.ToSvg(this.Units));
 		this.WriteAttributeString("height", height.ToSvg(this.Units));
@@ -606,8 +606,8 @@ internal class SvgXmlWriter : XmlTextWriter
 		foreach (var item in patterns)
 		{
 			this.WriteStartElement("rect");
-			this.WriteAttributeString("width", (item.Value.Width).ToSvg(this.Units));
-			this.WriteAttributeString("height", (item.Value.Height).ToSvg(this.Units));
+			this.WriteAttributeString("width", (item.Value.LengthX).ToSvg(this.Units));
+			this.WriteAttributeString("height", (item.Value.LengthY).ToSvg(this.Units));
 			this.WriteAttributeString("fill", $"url(#{item.Key})");
 			this.WriteEndElement();
 		}

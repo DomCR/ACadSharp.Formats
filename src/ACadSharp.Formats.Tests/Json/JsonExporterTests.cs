@@ -16,7 +16,7 @@ public class JsonExporterTests
 	{
 		Line line = new Line(new XYZ(0, 0, 0), new XYZ(10, 10, 0));
 
-		string json = JsonExporter.Serialize(line, new JsonSerializerOptions
+		string json = CadJsonSerializer.Serialize(line, new JsonSerializerOptions
 		{
 			IgnoreReadOnlyProperties = true,
 			IgnoreReadOnlyFields = true,

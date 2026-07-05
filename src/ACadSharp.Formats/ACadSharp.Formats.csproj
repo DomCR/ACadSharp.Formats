@@ -22,9 +22,13 @@
 		<SignAssembly>True</SignAssembly>
 		<AssemblyOriginatorKeyFile>../ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
-	
-	<ItemGroup>
-	  <PackageReference Include="ACadSharp" Version="3.5.*" />
+
+	<ItemGroup Condition="'$(Configuration)' != 'Release'">
+		<ProjectReference Include="..\ACadSharp\src\ACadSharp\ACadSharp.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+		<PackageReference Include="ACadSharp" Version="3.5.*" />
 	</ItemGroup>
 
 	<Import Project="..\CSUtilities\CSUtilities\CSUtilities.projitems" Label="Shared" />

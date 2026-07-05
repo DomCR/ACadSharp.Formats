@@ -5,7 +5,7 @@ using System.Xml;
 
 namespace ACadSharp.Formats.Svg;
 
-public class SvgExporter : Exporter, IMediaExporter
+public class SvgExporter : ExporterBase
 {
 	public SvgConfiguration Configuration { get; set; } = new SvgConfiguration();
 
@@ -21,7 +21,7 @@ public class SvgExporter : Exporter, IMediaExporter
 	{
 	}
 
-	public void Export(Layout layout)
+	public override void Export(Layout layout)
 	{
 		this.createWriter();
 

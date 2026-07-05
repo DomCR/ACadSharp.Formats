@@ -1,4 +1,5 @@
 ﻿using ACadSharp.IO;
+using ACadSharp.Objects;
 using ACadSharp.Tables;
 using System;
 
@@ -11,4 +12,5 @@ public interface IExporter : IDisposable
 	public void Export(BlockRecord record);
 
 	public void Export(CadDocument document);
+	void Export(Layout layout);
 }

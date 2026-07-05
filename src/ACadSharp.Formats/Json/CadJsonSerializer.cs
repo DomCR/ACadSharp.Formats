@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace ACadSharp.Formats.Json;
 
-public class JsonExporter
+public class CadJsonSerializer
 {
 	public static string Serialize<T>(T obj, JsonSerializerOptions options = null)
 		where T : CadObject

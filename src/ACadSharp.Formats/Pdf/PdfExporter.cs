@@ -4,7 +4,7 @@ using System.IO;
 
 namespace ACadSharp.Formats.Pdf;
 
-public class PdfExporter : Exporter, IMediaExporter
+public class PdfExporter : ExporterBase
 {
 	public PdfExporter(string filename)
 		: this(File.Create(filename))
@@ -16,7 +16,7 @@ public class PdfExporter : Exporter, IMediaExporter
 	{
 	}
 
-	public void Export(Layout layout)
+	public override void Export(Layout layout)
 	{
 		throw new System.NotImplementedException();
 	}
