@@ -11,6 +11,7 @@
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
 		<SignAssembly>True</SignAssembly>
+		<AssemblyOriginatorKeyFile>../ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -34,7 +35,5 @@
 	<ItemGroup>
 		<ProjectReference Include="..\ACadSharp.Formats\ACadSharp.Formats.csproj" />
 	</ItemGroup>
-
-	<Import Project="..\CSUtilities\CSUtilities\CSUtilities.projitems" Label="Shared" />
 
 </Project>

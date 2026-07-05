@@ -1,7 +1,6 @@
 ﻿using ACadSharp.Entities;
 using ACadSharp.Extensions;
 using ACadSharp.IO;
-using ACadSharp.Objects;
 using ACadSharp.Tables;
 using ACadSharp.Types.Units;
 using CSMath;
@@ -11,108 +10,18 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Xml;
 
 namespace ACadSharp.Formats.Svg;
 
-internal class SvgXmlWriter : XmlTextWriter
+internal class SvgEntityWriter : CadXmlWriter
 {
-	public event NotificationEventHandler OnNotification;
+	public bool IsPaperSpace { get; set; } = false;
 
-	public SvgConfiguration Configuration { get; } = new();
-
-	public Layout Layout { get; set; }
-
-	public UnitsType Units { get; protected set; }
-
-	public SvgXmlWriter(Stream stream, SvgConfiguration configuration) : this(stream, configuration, null)
+	public SvgEntityWriter(SvgConfiguration configuration, UnitsType units, Encoding encoding) : base(configuration, units, encoding)
 	{
 	}
 
-	public SvgXmlWriter(Stream stream, SvgConfiguration configuration, Encoding? encoding) : base(stream, encoding)
-	{
-		this.Configuration = configuration;
-	}
-
-	public void WriteAttributeString(string localName, double value)
-	{
-		this.WriteAttributeString(localName, value, this.Units);
-	}
-
-	public void WriteAttributeString(string localName, double value, UnitsType units)
-	{
-		this.WriteAttributeString(localName, value.ToSvg(units));
-	}
-
-	public void WriteBlock(BlockRecord record)
-	{
-		this.Units = record.Units;
-
-		BoundingBox box = record.GetBoundingBox();
-
-		this.startDocument(box, box, this.Units);
-
-		foreach (var e in record.Entities)
-		{
-			this.writeEntity(e);
-		}
-
-		this.endDocument();
-	}
-
-	public void WriteLayout(Layout layout)
-	{
-		this.Layout = layout;
-		this.Units = layout.PaperUnits.ToUnits();
-
-		double paperWidth = layout.PaperWidth;
-		double paperHeight = layout.PaperHeight;
-
-		switch (layout.PaperRotation)
-		{
-			case PlotRotation.Degrees90:
-			case PlotRotation.Degrees270:
-				paperWidth = layout.PaperHeight;
-				paperHeight = layout.PaperWidth;
-				break;
-		}
-
-		XYZ lowerCorner = XYZ.Zero;
-		XYZ upperCorner = new XYZ(paperWidth, paperHeight, 0.0);
-		BoundingBox paper = new BoundingBox(lowerCorner, upperCorner);
-
-		XYZ lowerMargin = layout.UnprintableMargin.BottomLeftCorner.Convert<XYZ>();
-		XYZ upperMargin = upperCorner - layout.UnprintableMargin.TopCorner.Convert<XYZ>();
-		BoundingBox margins = new BoundingBox(
-			lowerMargin,
-			upperMargin);
-
-		this.startDocument(paper, null, UnitsType.Millimeters);
-
-		Transform transform = new Transform(
-			lowerMargin.ToPixelSize(UnitsType.Millimeters),
-			new XYZ(layout.PrintScale),
-			XYZ.Zero);
-
-		foreach (var e in layout.AssociatedBlock.Entities)
-		{
-			this.writeEntity(e, transform);
-		}
-
-		this.endDocument();
-	}
-
-	protected void notify(string message, NotificationType type, Exception ex = null)
-	{
-		this.OnNotification?.Invoke(this, new NotificationEventArgs(message, type, ex));
-	}
-
-	protected void triggerNotification(object sender, NotificationEventArgs e)
-	{
-		this.OnNotification?.Invoke(sender, e);
-	}
-
-	protected void writeEntity(Entity entity, Transform transform)
+	public void WriteEntity(Entity entity, Transform transform)
 	{
 		this.WriteComment($"{entity.ObjectName} | {entity.Handle}");
 
@@ -160,9 +69,9 @@ internal class SvgXmlWriter : XmlTextWriter
 		}
 	}
 
-	private string colorSvg(Color color)
+	protected string colorSvg(Color color)
 	{
-		if (this.Layout != null && color.Equals(Color.Default))
+		if (this.IsPaperSpace && color.Equals(Color.Default))
 		{
 			color = Color.Black;
 		}
@@ -204,48 +113,9 @@ internal class SvgXmlWriter : XmlTextWriter
 		return lineType.IsComplex && !lineType.HasShapes;
 	}
 
-	private void endDocument()
-	{
-		this.WriteEndElement();
-		this.WriteEndDocument();
-		this.Close();
-	}
-
 	private double getPointSize(IEntity entity)
 	{
 		return entity.GetActiveLineWeightType().GetLineWeightValue().ToPixelSize(this.Units);
-	}
-
-	private void startDocument(BoundingBox box, BoundingBox? viewBox, UnitsType units)
-	{
-		this.WriteStartDocument();
-
-		this.WriteStartElement("svg");
-		this.WriteAttributeString("xmlns", "http://www.w3.org/2000/svg");
-
-		this.WriteAttributeString("width", box.Max.X - box.Min.X, units);
-		this.WriteAttributeString("height", box.Max.Y - box.Min.Y, units);
-
-		if (viewBox.HasValue)
-		{
-			var vb = viewBox.Value;
-			this.WriteStartAttribute("viewBox");
-			this.WriteValue(vb.Min.X.ToPixelSize(units));
-			this.WriteValue(" ");
-			this.WriteValue(vb.Min.Y.ToPixelSize(units));
-			this.WriteValue(" ");
-			this.WriteValue((vb.LengthX).ToPixelSize(units));
-			this.WriteValue(" ");
-			this.WriteValue((vb.LengthY).ToPixelSize(units));
-			this.WriteEndAttribute();
-		}
-
-		this.WriteAttributeString("transform", $"scale(1,-1)");
-
-		if (this.Layout != null)
-		{
-			this.WriteAttributeString("style", "background-color:white");
-		}
 	}
 
 	private string svgPoints<T>(IEnumerable<T> points, Transform transform)
@@ -349,7 +219,7 @@ internal class SvgXmlWriter : XmlTextWriter
 
 		foreach (Entity e in dimension.Block.Entities)
 		{
-			this.writeEntity(e, transform);
+			this.WriteEntity(e, transform);
 		}
 
 		this.WriteEndElement();
@@ -411,9 +281,9 @@ internal class SvgXmlWriter : XmlTextWriter
 		}
 	}
 
-	private void writeEntity(Entity entity)
+	public void WriteEntity(Entity entity)
 	{
-		this.writeEntity(entity, new Transform());
+		this.WriteEntity(entity, new Transform());
 	}
 
 	private void writeEntityAsPath<T>(Entity entity, Transform transform, params IEnumerable<T> points)
@@ -495,7 +365,7 @@ internal class SvgXmlWriter : XmlTextWriter
 
 		foreach (var e in insert.Block.Entities)
 		{
-			this.writeEntity(e);
+			this.WriteEntity(e);
 		}
 
 		this.WriteEndElement();

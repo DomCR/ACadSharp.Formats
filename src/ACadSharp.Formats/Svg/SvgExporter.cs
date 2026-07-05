@@ -9,7 +9,7 @@ public class SvgExporter : ExporterBase
 {
 	public SvgConfiguration Configuration { get; set; } = new SvgConfiguration();
 
-	private SvgXmlWriter _writer;
+	private SvgDocumentBuilder _builder;
 
 	public SvgExporter(string filename)
 		: this(File.Create(filename))
@@ -23,33 +23,28 @@ public class SvgExporter : ExporterBase
 
 	public override void Export(Layout layout)
 	{
-		this.createWriter();
+		this.createBuilder();
 
-		this._writer.WriteLayout(layout);
+		this._builder.WriteLayout(layout);
 	}
 
 	public override void Export(BlockRecord record)
 	{
-		this.createWriter();
+		this.createBuilder();
 
-		this._writer.WriteBlock(record);
+		this._builder.WriteBlock(record);
 	}
 
 	public override void Export(CadDocument document)
 	{
-		this.createWriter();
+		this.createBuilder();
 
-		this._writer.WriteBlock(document.ModelSpace);
+		this._builder.WriteBlock(document.ModelSpace);
 	}
 
-	private void createWriter()
+	private void createBuilder()
 	{
-		StreamWriter textWriter = new StreamWriter(this._stream);
-		this._writer = new SvgXmlWriter(this._stream, this.Configuration)
-		{
-			Formatting = Formatting.Indented
-		};
-
-		this._writer.OnNotification += this.triggerNotification;
+		this._builder = new SvgDocumentBuilder(this._stream, this.Configuration);
+		this._builder.OnNotification += this.triggerNotification;
 	}
 }

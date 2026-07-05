@@ -1,15 +1,17 @@
 ﻿using ACadSharp.Extensions;
-using ACadSharp.IO;
 using ACadSharp.Types.Units;
 using System;
+using System.Xml;
 
 namespace ACadSharp.Formats.Svg;
 
 /// <summary>
 /// Configuration for writing SVG files.
 /// </summary>
-public class SvgConfiguration : CadWriterConfiguration
+public class SvgConfiguration
 {
+	public Formatting Formatting { get; set; } = Formatting.Indented;
+
 	/// <summary>
 	/// The <see cref="LineWeightType"/> will be divided by this value to process the stroke-width in the svg when the units are <see cref="UnitsType.Unitless"/>.
 	/// </summary>
