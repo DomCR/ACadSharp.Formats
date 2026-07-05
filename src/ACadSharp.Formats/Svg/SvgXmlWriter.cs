@@ -5,7 +5,6 @@ using ACadSharp.Objects;
 using ACadSharp.Tables;
 using ACadSharp.Types.Units;
 using CSMath;
-using CSUtilities.Extensions;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -294,18 +293,6 @@ internal class SvgXmlWriter : XmlTextWriter
 		this.WriteEndElement();
 	}
 
-	private void writeDimension(Dimension dimension, Transform transform)
-	{
-		this.WriteStartElement("g");
-
-		foreach (Entity e in dimension.Block.Entities)
-		{
-			this.writeEntity(e, transform);
-		}
-
-		this.WriteEndElement();
-	}
-
 	private void writeCircle(Circle circle, Transform transform)
 	{
 		var loc = transform.ApplyTransform(circle.Center);
@@ -354,6 +341,18 @@ internal class SvgXmlWriter : XmlTextWriter
 		}
 
 		this.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
+	}
+
+	private void writeDimension(Dimension dimension, Transform transform)
+	{
+		this.WriteStartElement("g");
+
+		foreach (Entity e in dimension.Block.Entities)
+		{
+			this.writeEntity(e, transform);
+		}
+
+		this.WriteEndElement();
 	}
 
 	private void writeEllipse(Ellipse ellipse, Transform transform)
@@ -486,46 +485,34 @@ internal class SvgXmlWriter : XmlTextWriter
 		this.WriteEndElement();
 	}
 
-	private void writePatternHeader(string id)
+	private void writeInsert(Insert insert, Transform transform)
 	{
-		this.WriteStartElement("pattern");
+		var insertTransform = insert.GetTransform();
+		var merged = new Transform(transform.Matrix * insertTransform.Matrix);
 
-		this.WriteAttributeString("id", id);
-		this.WriteAttributeString("patternUnits", "userSpaceOnUse");
+		this.WriteStartElement("g");
+		this.writeTransform(merged);
+
+		foreach (var e in insert.Block.Entities)
+		{
+			this.writeEntity(e);
+		}
+
+		this.WriteEndElement();
 	}
 
-	private string writePatternHeader(Hatch hatch)
+	private void writeLine(Line line, Transform transform)
 	{
-		string id = $"{hatch.Pattern.GetHashCode()}_{hatch.Pattern.Name}";
+		this.WriteStartElement("line");
 
-		this.WriteStartElement("pattern");
+		this.writeEntityHeader(line, transform);
 
-		this.WriteAttributeString("id", id);
-		this.WriteAttributeString("patternUnits", "userSpaceOnUse");
+		this.WriteAttributeString("x1", line.StartPoint.X.ToSvg(this.Units));
+		this.WriteAttributeString("y1", line.StartPoint.Y.ToSvg(this.Units));
+		this.WriteAttributeString("x2", line.EndPoint.X.ToSvg(this.Units));
+		this.WriteAttributeString("y2", line.EndPoint.Y.ToSvg(this.Units));
 
-		return id;
-	}
-
-	private string writeSolidPattern(Hatch hatch)
-	{
-		string id = this.writePatternHeader(hatch);
-
-		this.WriteAttributeString("width", "100%");
-		this.WriteAttributeString("height", "100%");
-
-		this.WriteStartElement("rect");
-
-		this.WriteAttributeString("width", "100%");
-		this.WriteAttributeString("height", "100%");
-		this.WriteAttributeString("fill", this.colorSvg(hatch.Color));
-
-		//rect
 		this.WriteEndElement();
-
-		//pattern
-		this.WriteEndElement();
-
-		return id;
 	}
 
 	private string writePattern(Hatch hatch)
@@ -618,34 +605,24 @@ internal class SvgXmlWriter : XmlTextWriter
 		return id;
 	}
 
-	private void writeInsert(Insert insert, Transform transform)
+	private void writePatternHeader(string id)
 	{
-		var insertTransform = insert.GetTransform();
-		var merged = new Transform(transform.Matrix * insertTransform.Matrix);
+		this.WriteStartElement("pattern");
 
-		this.WriteStartElement("g");
-		this.writeTransform(merged);
-
-		foreach (var e in insert.Block.Entities)
-		{
-			this.writeEntity(e);
-		}
-
-		this.WriteEndElement();
+		this.WriteAttributeString("id", id);
+		this.WriteAttributeString("patternUnits", "userSpaceOnUse");
 	}
 
-	private void writeLine(Line line, Transform transform)
+	private string writePatternHeader(Hatch hatch)
 	{
-		this.WriteStartElement("line");
+		string id = $"{hatch.Pattern.GetHashCode()}_{hatch.Pattern.Name}";
 
-		this.writeEntityHeader(line, transform);
+		this.WriteStartElement("pattern");
 
-		this.WriteAttributeString("x1", line.StartPoint.X.ToSvg(this.Units));
-		this.WriteAttributeString("y1", line.StartPoint.Y.ToSvg(this.Units));
-		this.WriteAttributeString("x2", line.EndPoint.X.ToSvg(this.Units));
-		this.WriteAttributeString("y2", line.EndPoint.Y.ToSvg(this.Units));
+		this.WriteAttributeString("id", id);
+		this.WriteAttributeString("patternUnits", "userSpaceOnUse");
 
-		this.WriteEndElement();
+		return id;
 	}
 
 	private void writePoint(Point point, Transform transform)
@@ -682,6 +659,47 @@ internal class SvgXmlWriter : XmlTextWriter
 		this.WriteAttributeString("fill", "none");
 
 		this.WriteEndElement();
+	}
+
+	private void writeSolid(Solid solid, Transform transform)
+	{
+		this.WriteStartElement("polygon");
+
+		this.writeEntityHeader(solid, transform);
+
+		string pts = this.svgPoints([solid.FirstCorner, solid.SecondCorner, solid.ThirdCorner, solid.FourthCorner], transform);
+		this.WriteAttributeString("points", pts);
+		this.WriteAttributeString("fill", this.colorSvg(solid.GetActiveColor()));
+
+		this.WriteEndElement();
+	}
+
+	private string writeSolidPattern(Hatch hatch)
+	{
+		string id = this.writePatternHeader(hatch);
+
+		this.WriteAttributeString("width", "100%");
+		this.WriteAttributeString("height", "100%");
+
+		this.WriteStartElement("rect");
+
+		this.WriteAttributeString("width", "100%");
+		this.WriteAttributeString("height", "100%");
+		this.WriteAttributeString("fill", this.colorSvg(hatch.Color));
+
+		//rect
+		this.WriteEndElement();
+
+		//pattern
+		this.WriteEndElement();
+
+		return id;
+	}
+
+	private void writeSpline(Spline spline, Transform transform)
+	{
+		spline.UpdateFromFitPoints();
+		this.writeEntityAsPath(spline, transform, spline.PolygonalVertexes(this.Configuration.ArcPoints));
 	}
 
 	private void writeText(IText text, Transform transform)
@@ -833,25 +851,6 @@ internal class SvgXmlWriter : XmlTextWriter
 		this.WriteEndElement();
 	}
 
-	private void writeSolid(Solid solid, Transform transform)
-	{
-		this.WriteStartElement("polygon");
-
-		this.writeEntityHeader(solid, transform);
-
-		string pts = this.svgPoints([solid.FirstCorner, solid.SecondCorner, solid.ThirdCorner, solid.FourthCorner], transform);
-		this.WriteAttributeString("points", pts);
-		this.WriteAttributeString("fill", this.colorSvg(solid.GetActiveColor()));
-
-		this.WriteEndElement();
-	}
-
-	private void writeSpline(Spline spline, Transform transform)
-	{
-		spline.UpdateFromFitPoints();
-		this.writeEntityAsPath(spline, transform, spline.PolygonalVertexes(this.Configuration.ArcPoints));
-	}
-
 	private void writeTransform(Transform transform)
 	{
 		XYZ? translation = transform.Translation != XYZ.Zero ? transform.Translation : null;
@@ -891,7 +890,7 @@ internal class SvgXmlWriter : XmlTextWriter
 			sb.Append($"{r.ToString(CultureInfo.InvariantCulture)})");
 		}
 
-		if (sb.ToString().IsNullOrEmpty())
+		if (string.IsNullOrEmpty(sb.ToString()))
 		{
 			return;
 		}

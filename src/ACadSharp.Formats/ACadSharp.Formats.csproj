@@ -31,6 +31,4 @@
 		<PackageReference Include="ACadSharp" Version="3.5.*" />
 	</ItemGroup>
 
-	<Import Project="..\CSUtilities\CSUtilities\CSUtilities.projitems" Label="Shared" />
-
 </Project>
