@@ -13,11 +13,13 @@ using System.Text;
 
 namespace ACadSharp.Formats.Svg;
 
-internal class SvgEntityWriter : CadXmlWriter
+internal class SvgEntityWriter
 {
-	public SvgEntityWriter(SvgConfiguration configuration, UnitsType units, Encoding encoding)
-		: base(configuration, units, encoding)
+	private readonly CadXmlWriter _writer;
+
+	public SvgEntityWriter(CadXmlWriter writer)
 	{
+		this._writer = writer;
 	}
 
 	public void WriteEntity(Entity entity, Transform transform)
@@ -61,7 +63,7 @@ internal class SvgEntityWriter : CadXmlWriter
 				this.writeSolid(solid, transform);
 				break;
 			default:
-				this.notify($"[{entity.ObjectName}] Entity not implemented.", NotificationType.NotImplemented);
+				_writer.Notify($"[{entity.ObjectName}] Entity not implemented.", NotificationType.NotImplemented);
 				break;
 		}
 	}
@@ -79,11 +81,11 @@ internal class SvgEntityWriter : CadXmlWriter
 			}
 
 			var pt = pts[0];
-			sb.Append($"M {pt.ToPixelSize(this.Units).ToSvg()} ");
+			sb.Append($"M {this._writer.ToSvgPixelSizeFormat(pt)} ");
 			for (int i = 1; i < pts.Length; i++)
 			{
 				pt = pts[i];
-				sb.Append($"L {pt.ToPixelSize(this.Units).ToSvg()} ");
+				sb.Append($"L {this._writer.ToSvgPixelSizeFormat(pt)} ");
 			}
 
 			if (item.IsClosed)
@@ -100,9 +102,10 @@ internal class SvgEntityWriter : CadXmlWriter
 		return lineType.IsComplex && !lineType.HasShapes;
 	}
 
+	[Obsolete]
 	private double getPointSize(IEntity entity)
 	{
-		return entity.GetActiveLineWeightType().GetLineWeightValue().ToPixelSize(this.Units);
+		return this._writer.GetPointSize(entity);
 	}
 
 	private string svgPoints<T>(IEnumerable<T> points, Transform transform)
@@ -114,11 +117,11 @@ internal class SvgEntityWriter : CadXmlWriter
 		}
 
 		StringBuilder sb = new StringBuilder();
-		sb.Append(points.First().ToPixelSize(this.Units).ToSvg());
+		sb.Append(this._writer.ToSvgPixelSizeFormat(points.First()));
 		foreach (T point in points.Skip(1))
 		{
 			sb.Append(' ');
-			sb.Append(point.ToPixelSize(this.Units).ToSvg());
+			sb.Append(this._writer.ToSvgPixelSizeFormat(point));
 		}
 
 		return sb.ToString();
@@ -126,7 +129,7 @@ internal class SvgEntityWriter : CadXmlWriter
 
 	private void writeArc(Arc arc, Transform transform)
 	{
-		this.WriteStartElement("path");
+		_writer.WriteStartElement("path");
 
 		this.writeEntityHeader(arc, transform);
 
@@ -137,34 +140,34 @@ internal class SvgEntityWriter : CadXmlWriter
 
 		StringBuilder sb = new StringBuilder();
 
-		sb.Append($"M {start.ToPixelSize(this.Units).ToSvg()}");
+		sb.Append($"M {this._writer.ToSvgPixelSizeFormat(start)}");
 		sb.Append($" ");
-		sb.Append($"A {arc.Radius.ToPixelSize(this.Units)} {arc.Radius.ToPixelSize(this.Units)}");
+		sb.Append($"A {this._writer.ToSvgPixelSizeFormat(arc.Radius)} {this._writer.ToSvgPixelSizeFormat(arc.Radius)}");
 		sb.Append($" ");
-		sb.Append($"{0} {largeArc} {1} {end.ToPixelSize(this.Units).ToSvg()}");
+		sb.Append($"{0} {largeArc} {1} {this._writer.ToSvgPixelSizeFormat(end)}");
 
-		this.WriteAttributeString("d", sb.ToString());
+		_writer.WriteAttributeString("d", sb.ToString());
 
-		this.WriteAttributeString("fill", "none");
+		_writer.WriteAttributeString("fill", "none");
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeCircle(Circle circle, Transform transform)
 	{
 		var loc = transform.ApplyTransform(circle.Center);
 
-		this.WriteStartElement("circle");
+		_writer.WriteStartElement("circle");
 
 		this.writeEntityHeader(circle, transform);
 
-		this.WriteAttributeString("r", circle.Radius);
-		this.WriteAttributeString("cx", loc.X);
-		this.WriteAttributeString("cy", loc.Y);
+		_writer.WriteAttributeString("r", circle.Radius);
+		_writer.WriteAttributeString("cx", loc.X);
+		_writer.WriteAttributeString("cy", loc.Y);
 
-		this.WriteAttributeString("fill", "none");
+		_writer.WriteAttributeString("fill", "none");
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	public void WriteDashes(IEnumerable<double> dashes)
@@ -173,11 +176,11 @@ internal class SvgEntityWriter : CadXmlWriter
 
 		foreach (var d in dashes)
 		{
-			sb.Append(Math.Abs(d.ToPixelSize(this.Units)));
+			sb.Append(this._writer.ToSvgPixelSizeFormat(Math.Abs(d)));
 			sb.Append(' ');
 		}
 
-		this.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
+		_writer.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
 	}
 
 	public void WriteDashes(LineType lineType, double pointSize)
@@ -187,36 +190,36 @@ internal class SvgEntityWriter : CadXmlWriter
 		{
 			if (segment.IsPoint)
 			{
-				sb.Append(pointSize.ToPixelSize(this.Units));
+				sb.Append(this._writer.ToSvgPixelSizeFormat(pointSize));
 			}
 			else
 			{
-				sb.Append(Math.Abs(segment.Length.ToPixelSize(this.Units)));
+				sb.Append(this._writer.ToSvgPixelSizeFormat(Math.Abs(segment.Length)));
 			}
 
 			sb.Append(' ');
 		}
 
-		this.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
+		_writer.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
 	}
 
 	private void writeDimension(Dimension dimension, Transform transform)
 	{
-		this.WriteStartElement("g");
+		_writer.WriteStartElement("g");
 
 		foreach (Entity e in dimension.Block.Entities)
 		{
 			this.WriteEntity(e, transform);
 		}
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeEllipse(Ellipse ellipse, Transform transform)
 	{
 		if (ellipse.IsFullEllipse)
 		{
-			this.WriteStartElement("path");
+			_writer.WriteStartElement("path");
 
 			this.writeEntityHeader(ellipse, transform);
 
@@ -225,46 +228,53 @@ internal class SvgEntityWriter : CadXmlWriter
 			XYZ start = ellipse.PolarCoordinateRelativeToCenter(0);
 			XYZ end = ellipse.PolarCoordinateRelativeToCenter(Math.PI);
 
-			sb.Append($"M {start.ToPixelSize(this.Units).ToSvg()} ");
-			sb.Append($"A {ellipse.MajorAxis / 2} {ellipse.MinorAxis / 2} {MathHelper.RadToDeg(ellipse.Rotation)} {0} {1} {end.ToPixelSize(this.Units).ToSvg()} ");
+			string rx = this._writer.ToSvgPixelSizeFormat(ellipse.MajorAxis / 2);
+			string ry = this._writer.ToSvgPixelSizeFormat(ellipse.MinorAxis / 2);
+			string x_axis_rotation = MathHelper.RadToDeg(ellipse.Rotation).ToSvg();
+			string xy = this._writer.ToSvgPixelSizeFormat(end);
+
+			sb.Append($"M {this._writer.ToSvgPixelSizeFormat(start)} ");
+			sb.Append($"A {rx} {ry} {x_axis_rotation} {0} {1} {xy} ");
 
 			start = ellipse.PolarCoordinateRelativeToCenter(Math.PI);
 			end = ellipse.PolarCoordinateRelativeToCenter(MathHelper.TwoPI);
-			sb.Append($"A {ellipse.MajorAxis / 2} {ellipse.MinorAxis / 2} {MathHelper.RadToDeg(ellipse.Rotation)} {0} {1} {end.ToPixelSize(this.Units).ToSvg()}");
+
+			xy = this._writer.ToSvgPixelSizeFormat(end);
+			sb.Append($"A {rx} {ry} {x_axis_rotation} {0} {1} {xy}");
 
 			//A rx ry rotation large-arc-flag sweep-flag x y
-			this.WriteAttributeString("d", sb.ToString());
+			_writer.WriteAttributeString("d", sb.ToString());
 
-			this.WriteAttributeString("fill", "none");
-			this.WriteEndElement();
+			_writer.WriteAttributeString("fill", "none");
+			_writer.WriteEndElement();
 		}
 		else
 		{
-			this.WriteStartElement("polyline");
+			_writer.WriteStartElement("polyline");
 
 			this.writeEntityHeader(ellipse, transform);
 
 			var vertices = ellipse.PolygonalVertexes(256);
 			string pts = this.svgPoints(vertices, transform);
-			this.WriteAttributeString("points", pts);
-			this.WriteAttributeString("fill", "none");
+			_writer.WriteAttributeString("points", pts);
+			_writer.WriteAttributeString("fill", "none");
 
-			this.WriteEndElement();
+			_writer.WriteEndElement();
 
 			return;
 
 			//TODO: Fix the ellipse generation
-			this.WriteStartElement("path");
+			_writer.WriteStartElement("path");
 
 			this.writeEntityHeader(ellipse, transform);
 
 			ellipse.GetEndVertices(out XYZ start, out XYZ end);
 
 			//A rx ry rotation large-arc-flag sweep-flag x y
-			this.WriteAttributeString("d", $"M {start.ToPixelSize(this.Units).ToSvg()} A {ellipse.MajorAxis} {ellipse.MinorAxis} {MathHelper.RadToDeg(ellipse.Rotation)} {0} {1} {end.ToPixelSize(this.Units).ToSvg()}");
+			_writer.WriteAttributeString("d", $"M {start.ToPixelSize(this._writer.Units).ToSvg()} A {ellipse.MajorAxis} {ellipse.MinorAxis} {MathHelper.RadToDeg(ellipse.Rotation)} {0} {1} {end.ToPixelSize(this._writer.Units).ToSvg()}");
 
-			this.WriteAttributeString("fill", "none");
-			this.WriteEndElement();
+			_writer.WriteAttributeString("fill", "none");
+			_writer.WriteEndElement();
 		}
 	}
 
@@ -280,38 +290,38 @@ internal class SvgEntityWriter : CadXmlWriter
 		double pointSize = this.getPointSize(entity);
 		var lines = entity.GetActiveLineType().CreateLineTypeShape(pointSize, points);
 
-		this.WriteStartElement("path");
+		_writer.WriteStartElement("path");
 
 		this.writeEntityHeader(entity, transform);
 
-		this.WriteAttributeString("d", this.createPath(lines));
+		_writer.WriteAttributeString("d", this.createPath(lines));
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeEntityHeader(IEntity entity, Transform transform, bool drawStroke = true)
 	{
 		Color color = entity.GetActiveColor();
 
-		this.WriteAttributeString("id", entity.Handle.ToString());
+		_writer.WriteAttributeString("id", entity.Handle.ToString());
 
-		this.WriteStartAttribute("class");
-		this.WriteValue("entity");
-		this.WriteValue(" ");
-		this.WriteValue($"layer_{entity.Layer.Name}");
-		this.WriteEndAttribute();
+		this._writer.WriteStartAttribute("class");
+		this._writer.WriteValue("entity");
+		this._writer.WriteValue(" ");
+		this._writer.WriteValue($"layer_{entity.Layer.Name}");
+		this._writer.WriteEndAttribute();
 
 		if (drawStroke)
 		{
-			this.WriteAttributeString("stroke", this.ColorSvg(color));
+			_writer.WriteAttributeString("stroke", this._writer.ColorSvg(color));
 		}
 		else
 		{
-			this.WriteAttributeString("stroke", "none");
+			_writer.WriteAttributeString("stroke", "none");
 		}
 
 		var lineWeight = entity.GetActiveLineWeightType();
-		this.WriteAttributeString("stroke-width", $"{this.Configuration.GetLineWeightValue(lineWeight, this.Units).ToSvg(UnitsType.Millimeters)}");
+		_writer.WriteAttributeString("stroke-width", $"{this._writer.LineWeightValueToSvg(lineWeight)}");
 
 		this.writeTransform(transform);
 
@@ -324,28 +334,28 @@ internal class SvgEntityWriter : CadXmlWriter
 
 	private void writeHatch(Hatch hatch, Transform transform)
 	{
-		this.WriteStartElement("g");
+		_writer.WriteStartElement("g");
 
 		var patternId = this.writePattern(hatch);
 
 		List<Polyline3D> plines = new List<Polyline3D>();
 		foreach (Hatch.BoundaryPath path in hatch.Paths)
 		{
-			var pline = new Polyline3D(path.GetPoints(this.Configuration.ArcPoints));
+			var pline = new Polyline3D(path.GetPoints(this._writer.Configuration.ArcPoints));
 			plines.Add(pline);
 		}
 
-		this.WriteStartElement("path");
+		_writer.WriteStartElement("path");
 
 		this.writeEntityHeader(hatch, transform, drawStroke: false);
 
-		this.WriteAttributeString("d", this.createPath(plines));
+		_writer.WriteAttributeString("d", this.createPath(plines));
 
-		this.WriteAttributeString("fill", $"url(#{patternId})");
+		_writer.WriteAttributeString("fill", $"url(#{patternId})");
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeInsert(Insert insert, Transform transform)
@@ -353,7 +363,7 @@ internal class SvgEntityWriter : CadXmlWriter
 		var insertTransform = insert.GetTransform();
 		var merged = new Transform(transform.Matrix * insertTransform.Matrix);
 
-		this.WriteStartElement("g");
+		_writer.WriteStartElement("g");
 		this.writeTransform(merged);
 
 		foreach (var e in insert.Block.Entities)
@@ -361,21 +371,21 @@ internal class SvgEntityWriter : CadXmlWriter
 			this.WriteEntity(e);
 		}
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeLine(Line line, Transform transform)
 	{
-		this.WriteStartElement("line");
+		_writer.WriteStartElement("line");
 
 		this.writeEntityHeader(line, transform);
 
-		this.WriteAttributeString("x1", line.StartPoint.X.ToSvg(this.Units));
-		this.WriteAttributeString("y1", line.StartPoint.Y.ToSvg(this.Units));
-		this.WriteAttributeString("x2", line.EndPoint.X.ToSvg(this.Units));
-		this.WriteAttributeString("y2", line.EndPoint.Y.ToSvg(this.Units));
+		_writer.WriteAttributeString("x1", this._writer.ToSvgFormat(line.StartPoint.X));
+		_writer.WriteAttributeString("y1", this._writer.ToSvgFormat(line.StartPoint.Y));
+		_writer.WriteAttributeString("x2", this._writer.ToSvgFormat(line.EndPoint.X));
+		_writer.WriteAttributeString("y2", this._writer.ToSvgFormat(line.EndPoint.Y));
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private string writePattern(Hatch hatch)
@@ -393,14 +403,14 @@ internal class SvgEntityWriter : CadXmlWriter
 
 			//Each line works individually repeating itself every offset
 			this.writePatternHeader(i);
-			this.WriteAttributeString("width", item.LineOffset.ToSvg(this.Units));
-			this.WriteAttributeString("height", item.LineOffset.ToSvg(this.Units));
+			_writer.WriteAttributeString("width", this._writer.ToSvgFormat(item.LineOffset));
+			_writer.WriteAttributeString("height", this._writer.ToSvgFormat(item.LineOffset));
 
 			this.writeTransform(name: "patternTransform",
-				translation: item.BasePoint.Convert<XYZ>().ToPixelSize(this.Units));
+				translation: item.BasePoint.Convert<XYZ>().ToPixelSize(this._writer.Units));
 			//rotation: -item.Angle);
 
-			this.WriteStartElement("line");
+			_writer.WriteStartElement("line");
 
 			//Direction of the line
 			var length = item.Offset.GetLength();
@@ -410,19 +420,19 @@ internal class SvgEntityWriter : CadXmlWriter
 			//Offset -> is the size of the line box
 
 			//Add BasePoint
-			this.WriteAttributeString("x1", 0.0d.ToSvg(this.Units));
-			this.WriteAttributeString("y1", 0.0d.ToSvg(this.Units));
-			this.WriteAttributeString("x2", (x).ToSvg(this.Units));
-			this.WriteAttributeString("y2", (y).ToSvg(this.Units));
+			_writer.WriteAttributeString("x1", 0.0d.ToSvg(this._writer.Units));
+			_writer.WriteAttributeString("y1", 0.0d.ToSvg(this._writer.Units));
+			_writer.WriteAttributeString("x2", (x).ToSvg(this._writer.Units));
+			_writer.WriteAttributeString("y2", (y).ToSvg(this._writer.Units));
 
 			//Rotate the pattern after line
-			//this.WriteAttributeString("x1", 0.0d.ToSvg(this.Units));
-			//this.WriteAttributeString("y1", (item.LineOffset / 2).ToSvg(this.Units));
-			//this.WriteAttributeString("x2", 1.0d.ToSvg(this.Units));
-			//this.WriteAttributeString("y2", (item.LineOffset / 2).ToSvg(this.Units));
+			//_writer.WriteAttributeString("x1", 0.0d.ToSvg(this._writer.Units));
+			//_writer.WriteAttributeString("y1", (item.LineOffset / 2).ToSvg(this._writer.Units));
+			//_writer.WriteAttributeString("x2", 1.0d.ToSvg(this._writer.Units));
+			//_writer.WriteAttributeString("y2", (item.LineOffset / 2).ToSvg(this._writer.Units));
 
-			this.WriteAttributeString("stroke", this.ColorSvg(hatch.GetActiveColor()));
-			this.WriteAttributeString("stroke-width", $"{this.Configuration.GetLineWeightValue(hatch.GetActiveLineWeightType(), this.Units).ToSvg(UnitsType.Millimeters)}");
+			_writer.WriteAttributeString("stroke", this._writer.ColorSvg(hatch.GetActiveColor()));
+			_writer.WriteAttributeString("stroke-width", $"{this._writer.LineWeightValueToSvg(hatch.GetActiveLineWeightType())}");
 
 			if (item.DashLengths.Any())
 			{
@@ -430,131 +440,131 @@ internal class SvgEntityWriter : CadXmlWriter
 			}
 
 			//Line
-			this.WriteEndElement();
+			_writer.WriteEndElement();
 
 			if (false)
 			{
-				this.WriteStartElement("rect");
-				this.WriteAttributeString("width", (item.LineOffset).ToSvg(this.Units));
-				this.WriteAttributeString("height", (item.LineOffset).ToSvg(this.Units));
-				this.WriteAttributeString("fill", $"none");
-				this.WriteAttributeString("stroke", $"red");
-				this.WriteEndElement();
+				_writer.WriteStartElement("rect");
+				_writer.WriteAttributeString("width", (item.LineOffset).ToSvg(this._writer.Units));
+				_writer.WriteAttributeString("height", (item.LineOffset).ToSvg(this._writer.Units));
+				_writer.WriteAttributeString("fill", $"none");
+				_writer.WriteAttributeString("stroke", $"red");
+				_writer.WriteEndElement();
 			}
 
 			//Pattern
-			this.WriteEndElement();
+			_writer.WriteEndElement();
 		}
 
 		string id = this.writePatternHeader(hatch);
 		var width = patterns.Values.Max(w => w.LengthX);
 		var height = patterns.Values.Max(w => w.LengthY);
 
-		this.WriteAttributeString("width", width.ToSvg(this.Units));
-		this.WriteAttributeString("height", height.ToSvg(this.Units));
+		_writer.WriteAttributeString("width", width.ToSvg(this._writer.Units));
+		_writer.WriteAttributeString("height", height.ToSvg(this._writer.Units));
 
 		foreach (var item in patterns)
 		{
-			this.WriteStartElement("rect");
-			this.WriteAttributeString("width", (item.Value.LengthX).ToSvg(this.Units));
-			this.WriteAttributeString("height", (item.Value.LengthY).ToSvg(this.Units));
-			this.WriteAttributeString("fill", $"url(#{item.Key})");
-			this.WriteEndElement();
+			_writer.WriteStartElement("rect");
+			_writer.WriteAttributeString("width", (item.Value.LengthX).ToSvg(this._writer.Units));
+			_writer.WriteAttributeString("height", (item.Value.LengthY).ToSvg(this._writer.Units));
+			_writer.WriteAttributeString("fill", $"url(#{item.Key})");
+			_writer.WriteEndElement();
 		}
 
 		//pattern
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 
 		return id;
 	}
 
 	private void writePatternHeader(string id)
 	{
-		this.WriteStartElement("pattern");
+		_writer.WriteStartElement("pattern");
 
-		this.WriteAttributeString("id", id);
-		this.WriteAttributeString("patternUnits", "userSpaceOnUse");
+		_writer.WriteAttributeString("id", id);
+		_writer.WriteAttributeString("patternUnits", "userSpaceOnUse");
 	}
 
 	private string writePatternHeader(Hatch hatch)
 	{
 		string id = $"{hatch.Pattern.GetHashCode()}_{hatch.Pattern.Name}";
 
-		this.WriteStartElement("pattern");
+		_writer.WriteStartElement("pattern");
 
-		this.WriteAttributeString("id", id);
-		this.WriteAttributeString("patternUnits", "userSpaceOnUse");
+		_writer.WriteAttributeString("id", id);
+		_writer.WriteAttributeString("patternUnits", "userSpaceOnUse");
 
 		return id;
 	}
 
 	private void writePoint(Point point, Transform transform)
 	{
-		this.WriteStartElement("circle");
+		_writer.WriteStartElement("circle");
 
 		this.writeEntityHeader(point, transform);
 
-		this.WriteAttributeString("r", this.Configuration.PointRadius, UnitsType.Unitless);
-		this.WriteAttributeString("cx", point.Location.X);
-		this.WriteAttributeString("cy", point.Location.Y);
+		_writer.WriteAttributeString("r", this._writer.Configuration.PointRadius, UnitsType.Unitless);
+		_writer.WriteAttributeString("cx", point.Location.X);
+		_writer.WriteAttributeString("cy", point.Location.Y);
 
-		this.WriteAttributeString("fill", this.ColorSvg(point.GetActiveColor()));
+		_writer.WriteAttributeString("fill", this._writer.ColorSvg(point.GetActiveColor()));
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writePolyline(IPolyline polyline, Transform transform)
 	{
 		if (polyline.IsClosed)
 		{
-			this.WriteStartElement("polygon");
+			_writer.WriteStartElement("polygon");
 		}
 		else
 		{
-			this.WriteStartElement("polyline");
+			_writer.WriteStartElement("polyline");
 		}
 
 		this.writeEntityHeader(polyline, transform);
 
-		string pts = this.svgPoints(polyline.GetPoints<XY>(this.Configuration.ArcPoints), transform);
+		string pts = this.svgPoints(polyline.GetPoints<XY>(this._writer.Configuration.ArcPoints), transform);
 
-		this.WriteAttributeString("points", pts);
-		this.WriteAttributeString("fill", "none");
+		_writer.WriteAttributeString("points", pts);
+		_writer.WriteAttributeString("fill", "none");
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeSolid(Solid solid, Transform transform)
 	{
-		this.WriteStartElement("polygon");
+		_writer.WriteStartElement("polygon");
 
 		this.writeEntityHeader(solid, transform);
 
 		string pts = this.svgPoints([solid.FirstCorner, solid.SecondCorner, solid.ThirdCorner, solid.FourthCorner], transform);
-		this.WriteAttributeString("points", pts);
-		this.WriteAttributeString("fill", this.ColorSvg(solid.GetActiveColor()));
+		_writer.WriteAttributeString("points", pts);
+		_writer.WriteAttributeString("fill", this._writer.ColorSvg(solid.GetActiveColor()));
 
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private string writeSolidPattern(Hatch hatch)
 	{
 		string id = this.writePatternHeader(hatch);
 
-		this.WriteAttributeString("width", "100%");
-		this.WriteAttributeString("height", "100%");
+		_writer.WriteAttributeString("width", "100%");
+		_writer.WriteAttributeString("height", "100%");
 
-		this.WriteStartElement("rect");
+		_writer.WriteStartElement("rect");
 
-		this.WriteAttributeString("width", "100%");
-		this.WriteAttributeString("height", "100%");
-		this.WriteAttributeString("fill", this.ColorSvg(hatch.Color));
+		_writer.WriteAttributeString("width", "100%");
+		_writer.WriteAttributeString("height", "100%");
+		_writer.WriteAttributeString("fill", this._writer.ColorSvg(hatch.Color));
 
 		//rect
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 
 		//pattern
-		this.WriteEndElement();
+		_writer.WriteEndElement();
 
 		return id;
 	}
@@ -562,7 +572,7 @@ internal class SvgEntityWriter : CadXmlWriter
 	private void writeSpline(Spline spline, Transform transform)
 	{
 		spline.UpdateFromFitPoints();
-		this.writeEntityAsPath(spline, transform, spline.PolygonalVertexes(this.Configuration.ArcPoints));
+		this.writeEntityAsPath(spline, transform, spline.PolygonalVertexes(this._writer.Configuration.ArcPoints));
 	}
 
 	private void writeText(IText text, Transform transform)
@@ -582,37 +592,37 @@ internal class SvgEntityWriter : CadXmlWriter
 			insert = text.InsertPoint;
 		}
 
-		this.WriteStartElement("g");
+		_writer.WriteStartElement("g");
 		this.writeTransform(transform);
 
-		this.WriteStartElement("text");
+		_writer.WriteStartElement("text");
 
-		this.writeTransform(translation: insert.ToPixelSize(this.Units), scale: new XYZ(1, -1, 0), rotation: text.Rotation != 0 ? text.Rotation : null);
+		this.writeTransform(translation: insert.ToPixelSize(this._writer.Units), scale: new XYZ(1, -1, 0), rotation: text.Rotation != 0 ? text.Rotation : null);
 
-		this.WriteAttributeString("fill", this.ColorSvg(text.GetActiveColor()));
+		_writer.WriteAttributeString("fill", this._writer.ColorSvg(text.GetActiveColor()));
 
 		//<text x="20" y="35" class="small">My</text>
-		this.WriteStartAttribute("style");
-		this.WriteValue("font:");
-		this.WriteValue(text.Height.ToSvg(this.Units));
-		if (this.Units == UnitsType.Unitless)
+		this._writer.WriteStartAttribute("style");
+		this._writer.WriteValue("font:");
+		this._writer.WriteValue(text.Height.ToSvg(this._writer.Units));
+		if (this._writer.Units == UnitsType.Unitless)
 		{
-			this.WriteValue("px");
+			this._writer.WriteValue("px");
 		}
 
 		if (text.Style.TrueType.HasFlag(FontFlags.Bold))
 		{
-			this.WriteValue("bold");
+			this._writer.WriteValue("bold");
 		}
 
 		if (text.Style.TrueType.HasFlag(FontFlags.Italic))
 		{
-			this.WriteValue("italic");
+			this._writer.WriteValue("italic");
 		}
 
-		this.WriteValue(" ");
-		this.WriteValue(Path.GetFileNameWithoutExtension(text.Style.Filename));
-		this.WriteEndAttribute();
+		this._writer.WriteValue(" ");
+		this._writer.WriteValue(Path.GetFileNameWithoutExtension(text.Style.Filename));
+		this._writer.WriteEndAttribute();
 
 		switch (text)
 		{
@@ -620,40 +630,40 @@ internal class SvgEntityWriter : CadXmlWriter
 				switch (mtext.AttachmentPoint)
 				{
 					case AttachmentPointType.TopLeft:
-						this.WriteAttributeString("alignment-baseline", "hanging");
-						this.WriteAttributeString("text-anchor", "start");
+						_writer.WriteAttributeString("alignment-baseline", "hanging");
+						_writer.WriteAttributeString("text-anchor", "start");
 						break;
 					case AttachmentPointType.TopCenter:
-						this.WriteAttributeString("alignment-baseline", "hanging");
-						this.WriteAttributeString("text-anchor", "middle");
+						_writer.WriteAttributeString("alignment-baseline", "hanging");
+						_writer.WriteAttributeString("text-anchor", "middle");
 						break;
 					case AttachmentPointType.TopRight:
-						this.WriteAttributeString("alignment-baseline", "hanging");
-						this.WriteAttributeString("text-anchor", "end");
+						_writer.WriteAttributeString("alignment-baseline", "hanging");
+						_writer.WriteAttributeString("text-anchor", "end");
 						break;
 					case AttachmentPointType.MiddleLeft:
-						this.WriteAttributeString("alignment-baseline", "middle");
-						this.WriteAttributeString("text-anchor", "start");
+						_writer.WriteAttributeString("alignment-baseline", "middle");
+						_writer.WriteAttributeString("text-anchor", "start");
 						break;
 					case AttachmentPointType.MiddleCenter:
-						this.WriteAttributeString("alignment-baseline", "middle");
-						this.WriteAttributeString("text-anchor", "middle");
+						_writer.WriteAttributeString("alignment-baseline", "middle");
+						_writer.WriteAttributeString("text-anchor", "middle");
 						break;
 					case AttachmentPointType.MiddleRight:
-						this.WriteAttributeString("alignment-baseline", "middle");
-						this.WriteAttributeString("text-anchor", "end");
+						_writer.WriteAttributeString("alignment-baseline", "middle");
+						_writer.WriteAttributeString("text-anchor", "end");
 						break;
 					case AttachmentPointType.BottomLeft:
-						this.WriteAttributeString("alignment-baseline", "baseline");
-						this.WriteAttributeString("text-anchor", "start");
+						_writer.WriteAttributeString("alignment-baseline", "baseline");
+						_writer.WriteAttributeString("text-anchor", "start");
 						break;
 					case AttachmentPointType.BottomCenter:
-						this.WriteAttributeString("alignment-baseline", "baseline");
-						this.WriteAttributeString("text-anchor", "middle");
+						_writer.WriteAttributeString("alignment-baseline", "baseline");
+						_writer.WriteAttributeString("text-anchor", "middle");
 						break;
 					case AttachmentPointType.BottomRight:
-						this.WriteAttributeString("alignment-baseline", "baseline");
-						this.WriteAttributeString("text-anchor", "end");
+						_writer.WriteAttributeString("alignment-baseline", "baseline");
+						_writer.WriteAttributeString("text-anchor", "end");
 						break;
 					default:
 						break;
@@ -661,34 +671,34 @@ internal class SvgEntityWriter : CadXmlWriter
 
 				foreach (var item in mtext.GetPlainTextLines())
 				{
-					this.WriteStartElement("tspan");
-					this.WriteAttributeString("x", 0);
-					this.WriteAttributeString("dy", "1em");
-					this.WriteString(item);
-					this.WriteEndElement();
+					_writer.WriteStartElement("tspan");
+					_writer.WriteAttributeString("x", 0);
+					_writer.WriteAttributeString("dy", "1em");
+					this._writer.WriteString(item);
+					_writer.WriteEndElement();
 				}
 
 				//Line to avoid the strange offset at the end
-				this.WriteStartElement("tspan");
-				this.WriteAttributeString("x", 0);
-				this.WriteAttributeString("dy", "1em");
-				this.WriteAttributeString("visibility", "hidden");
-				this.WriteString(".");
-				this.WriteEndElement();
+				_writer.WriteStartElement("tspan");
+				_writer.WriteAttributeString("x", 0);
+				_writer.WriteAttributeString("dy", "1em");
+				_writer.WriteAttributeString("visibility", "hidden");
+				this._writer.WriteString(".");
+				_writer.WriteEndElement();
 				break;
 			case TextEntity textEntity:
 
 				switch (textEntity.HorizontalAlignment)
 				{
 					case TextHorizontalAlignment.Left:
-						this.WriteAttributeString("text-anchor", "start");
+						_writer.WriteAttributeString("text-anchor", "start");
 						break;
 					case TextHorizontalAlignment.Middle:
 					case TextHorizontalAlignment.Center:
-						this.WriteAttributeString("text-anchor", "middle");
+						_writer.WriteAttributeString("text-anchor", "middle");
 						break;
 					case TextHorizontalAlignment.Right:
-						this.WriteAttributeString("text-anchor", "end");
+						_writer.WriteAttributeString("text-anchor", "end");
 						break;
 				}
 
@@ -696,22 +706,22 @@ internal class SvgEntityWriter : CadXmlWriter
 				{
 					case TextVerticalAlignmentType.Baseline:
 					case TextVerticalAlignmentType.Bottom:
-						this.WriteAttributeString("alignment-baseline", "baseline");
+						_writer.WriteAttributeString("alignment-baseline", "baseline");
 						break;
 					case TextVerticalAlignmentType.Middle:
-						this.WriteAttributeString("alignment-baseline", "middle");
+						_writer.WriteAttributeString("alignment-baseline", "middle");
 						break;
 					case TextVerticalAlignmentType.Top:
-						this.WriteAttributeString("alignment-baseline", "hanging");
+						_writer.WriteAttributeString("alignment-baseline", "hanging");
 						break;
 				}
 
-				this.WriteString(text.Value);
+				this._writer.WriteString(text.Value);
 				break;
 		}
 
-		this.WriteEndElement();
-		this.WriteEndElement();
+		_writer.WriteEndElement();
+		_writer.WriteEndElement();
 	}
 
 	private void writeTransform(Transform transform)
@@ -758,6 +768,6 @@ internal class SvgEntityWriter : CadXmlWriter
 			return;
 		}
 
-		this.WriteAttributeString(name, sb.ToString());
+		_writer.WriteAttributeString(name, sb.ToString());
 	}
 }

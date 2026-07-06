@@ -108,7 +108,7 @@ internal class SvgDocumentBuilder
 	{
 		this._styleWriter.WriteStyles();
 
-		this.mergeStream(this._entitiesWriter);
+		//this._entitiesWriter.WriteEntities();
 
 		this._xmlWriter.WriteEndElement();
 		this._xmlWriter.WriteEndDocument();
@@ -121,11 +121,7 @@ internal class SvgDocumentBuilder
 		this._xmlWriter.IsPaperSpace = isPaperSpace;
 		this._xmlWriter.OnNotification += this.triggerNotification;
 
-		this._entitiesWriter = new SvgEntityWriter(this.Configuration, this.Units, this._encoding)
-		{
-			IsPaperSpace = isPaperSpace
-		};
-		this._entitiesWriter.OnNotification += this.triggerNotification;
+		this._entitiesWriter = new SvgEntityWriter(this._xmlWriter);
 
 		this._styleWriter = new SvgStyleWriter(this._xmlWriter);
 	}
@@ -154,14 +150,10 @@ internal class SvgDocumentBuilder
 
 	private void processEntities(IEnumerable<Entity> entities, Transform transform)
 	{
-		this._entitiesWriter.WriteStartElement("svg", "http://www.w3.org/2000/svg");
-
 		foreach (var entity in entities)
 		{
 			this.processEntity(entity, transform);
 		}
-
-		this._entitiesWriter.WriteEndElement();
 	}
 
 	private void processEntity(Entity entity, Transform transform)

@@ -51,7 +51,7 @@ internal class SvgStyleWriter
 		{
 			this.writeCssLine($".layer_{layer.Name}{{");
 			this.writeCssLine($"stroke: {this._writer.ColorSvg(layer.Color)};");
-			this.writeCssLine($"stroke-width: {this._writer.WriteLineWeightValue(layer.LineWeight)};");
+			this.writeCssLine($"stroke-width: {this._writer.LineWeightValueToSvg(layer.LineWeight)};");
 			this.writeCssLine("}");
 			this._writer.WriteString(Environment.NewLine);
 		}

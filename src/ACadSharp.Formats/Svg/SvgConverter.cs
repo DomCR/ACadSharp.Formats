@@ -28,7 +28,7 @@ internal static class SvgConverter
 				break;
 		}
 
-		return $"{value.ToString(CultureInfo.InvariantCulture)}{unitSufix}";
+		return $"{value.ToSvg()}{unitSufix}";
 	}
 
 	public static string ToSvg<T>(this T vector)
