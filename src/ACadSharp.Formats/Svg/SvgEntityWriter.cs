@@ -15,11 +15,26 @@ namespace ACadSharp.Formats.Svg;
 
 internal class SvgEntityWriter
 {
+	public readonly List<(Entity, Transform)> _entities = new();
+
 	private readonly CadXmlWriter _writer;
 
 	public SvgEntityWriter(CadXmlWriter writer)
 	{
 		this._writer = writer;
+	}
+
+	public void AddEntity(Entity entity, Transform transform)
+	{
+		this._entities.Add((entity, transform));
+	}
+
+	public void WriteEntities()
+	{
+		foreach (var (entity, transform) in this._entities)
+		{
+			this.WriteEntity(entity, transform);
+		}
 	}
 
 	public void WriteEntity(Entity entity, Transform transform)
@@ -68,6 +83,11 @@ internal class SvgEntityWriter
 		}
 	}
 
+	public void WriteEntity(Entity entity)
+	{
+		this.WriteEntity(entity, new Transform());
+	}
+
 	private string createPath(params IEnumerable<IPolyline> polylines)
 	{
 		StringBuilder sb = new StringBuilder();
@@ -100,12 +120,6 @@ internal class SvgEntityWriter
 	private bool drawableLineType(LineType lineType)
 	{
 		return lineType.IsComplex && !lineType.HasShapes;
-	}
-
-	[Obsolete]
-	private double getPointSize(IEntity entity)
-	{
-		return this._writer.GetPointSize(entity);
 	}
 
 	private string svgPoints<T>(IEnumerable<T> points, Transform transform)
@@ -170,7 +184,7 @@ internal class SvgEntityWriter
 		_writer.WriteEndElement();
 	}
 
-	public void WriteDashes(IEnumerable<double> dashes)
+	private void writeDashes(IEnumerable<double> dashes)
 	{
 		StringBuilder sb = new StringBuilder();
 
@@ -183,7 +197,7 @@ internal class SvgEntityWriter
 		_writer.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
 	}
 
-	public void WriteDashes(LineType lineType, double pointSize)
+	private void writeDashes(LineType lineType, double pointSize)
 	{
 		StringBuilder sb = new StringBuilder();
 		foreach (LineType.Segment segment in lineType.Segments)
@@ -278,16 +292,11 @@ internal class SvgEntityWriter
 		}
 	}
 
-	public void WriteEntity(Entity entity)
-	{
-		this.WriteEntity(entity, new Transform());
-	}
-
 	private void writeEntityAsPath<T>(Entity entity, Transform transform, params IEnumerable<T> points)
 		where T : IVector
 	{
 		//Will be needed to write the linetypes that use shapes
-		double pointSize = this.getPointSize(entity);
+		double pointSize = this._writer.GetPointSize(entity);
 		var lines = entity.GetActiveLineType().CreateLineTypeShape(pointSize, points);
 
 		_writer.WriteStartElement("path");
@@ -338,7 +347,7 @@ internal class SvgEntityWriter
 		LineType lt = entity.GetActiveLineType();
 		if (this.drawableLineType(lt))
 		{
-			this.WriteDashes(lt, this.getPointSize(entity));
+			this.writeDashes(lt, this._writer.GetPointSize(entity));
 		}
 	}
 
@@ -446,7 +455,7 @@ internal class SvgEntityWriter
 
 			if (item.DashLengths.Any())
 			{
-				this.WriteDashes(item.DashLengths);
+				this.writeDashes(item.DashLengths);
 			}
 
 			//Line

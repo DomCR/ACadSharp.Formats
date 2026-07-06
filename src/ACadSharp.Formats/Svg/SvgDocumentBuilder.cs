@@ -9,7 +9,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using System.Xml.Linq;
 
 namespace ACadSharp.Formats.Svg;
 
@@ -108,7 +107,7 @@ internal class SvgDocumentBuilder
 	{
 		this._styleWriter.WriteStyles();
 
-		//this._entitiesWriter.WriteEntities();
+		this._entitiesWriter.WriteEntities();
 
 		this._xmlWriter.WriteEndElement();
 		this._xmlWriter.WriteEndDocument();
@@ -126,23 +125,6 @@ internal class SvgDocumentBuilder
 		this._styleWriter = new SvgStyleWriter(this._xmlWriter);
 	}
 
-	private void mergeStream(CadXmlWriter writer)
-	{
-		writer.Flush();
-		writer.BaseStream.Position = 0;
-
-		XDocument temp = XDocument.Load(writer.BaseStream, LoadOptions.None);
-		if (temp.Root is null)
-		{
-			return;
-		}
-
-		foreach (XNode node in temp.Root.Nodes())
-		{
-			node.WriteTo(this._xmlWriter);
-		}
-	}
-
 	private void processEntities(IEnumerable<Entity> entities)
 	{
 		this.processEntities(entities, new Transform());
@@ -152,6 +134,9 @@ internal class SvgDocumentBuilder
 	{
 		foreach (var entity in entities)
 		{
+			if(entity.IsInvisible)
+				continue;
+
 			this.processEntity(entity, transform);
 		}
 	}
@@ -161,7 +146,7 @@ internal class SvgDocumentBuilder
 		this._styleWriter.AddLineType(entity.LineType);
 		this._styleWriter.AddLayer(entity.Layer);
 
-		this._entitiesWriter.WriteEntity(entity, transform);
+		this._entitiesWriter.AddEntity(entity, transform);
 	}
 
 	private void startDocument(BoundingBox box, BoundingBox? viewBox, UnitsType units, bool isPaperSpace = false)

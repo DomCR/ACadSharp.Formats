@@ -45,17 +45,17 @@ internal class CadXmlWriter : XmlTextWriter
 
 	public string ToSvgPixelSizeFormat(IVector value)
 	{
-		return value.ToPixelSize(this.Units).ToSvg();
+		return value.ToPixelSize(this.Units).ToSvg(this.Configuration.DecimalPlaces);
 	}
 
 	public string ToSvgPixelSizeFormat(double value)
 	{
-		return value.ToPixelSize(this.Units).ToSvg();
+		return value.ToPixelSize(this.Units).ToSvg(this.Configuration.DecimalPlaces);
 	}
 
 	public string ToSvgFormat(double value)
 	{
-		return value.ToSvg(this.Units);
+		return value.ToSvg(this.Units, this.Configuration.DecimalPlaces);
 	}
 
 	public double GetPointSize(IEntity entity)

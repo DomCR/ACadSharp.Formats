@@ -7,42 +7,6 @@ namespace ACadSharp.Formats.Svg;
 
 internal static class SvgConverter
 {
-	public static string ToSvg(this double value)
-	{
-		return value.ToString(CultureInfo.InvariantCulture);
-	}
-
-	public static string ToSvg(this double value, UnitsType units)
-	{
-		string unitSufix = string.Empty;
-		switch (units)
-		{
-			case UnitsType.Centimeters:
-				unitSufix = "cm";
-				break;
-			case UnitsType.Millimeters:
-				unitSufix = "mm";
-				break;
-			case UnitsType.Inches:
-				unitSufix = "in";
-				break;
-		}
-
-		return $"{value.ToSvg()}{unitSufix}";
-	}
-
-	public static string ToSvg<T>(this T vector)
-		where T : IVector
-	{
-		return $"{vector[0].ToSvg()},{vector[1].ToSvg()}";
-	}
-
-	public static string ToSvg<T>(this T vector, UnitsType units)
-		where T : IVector
-	{
-		return $"{vector[0].ToSvg(units)},{vector[1].ToSvg(units)}";
-	}
-
 	public static double ToPixelSize(this double value, UnitsType units)
 	{
 		switch (units)
@@ -67,5 +31,48 @@ internal static class SvgConverter
 		}
 
 		return value;
+	}
+
+	public static string ToSvg(this double value, int? decimalPlaces = null)
+	{
+		if (decimalPlaces != null)
+		{
+			return value.ToString($"N{decimalPlaces}", CultureInfo.InvariantCulture);
+		}
+		else
+		{
+			return value.ToString(CultureInfo.InvariantCulture);
+		}
+	}
+
+	public static string ToSvg(this double value, UnitsType units, int? decimalPlaces = null)
+	{
+		string unitSufix = string.Empty;
+		switch (units)
+		{
+			case UnitsType.Centimeters:
+				unitSufix = "cm";
+				break;
+			case UnitsType.Millimeters:
+				unitSufix = "mm";
+				break;
+			case UnitsType.Inches:
+				unitSufix = "in";
+				break;
+		}
+
+		return $"{value.ToSvg(decimalPlaces)}{unitSufix}";
+	}
+
+	public static string ToSvg<T>(this T vector, int? decimalPlaces = null)
+		where T : IVector
+	{
+		return $"{vector[0].ToSvg(decimalPlaces)},{vector[1].ToSvg(decimalPlaces)}";
+	}
+
+	public static string ToSvg<T>(this T vector, UnitsType units, int? decimalPlaces = null)
+		where T : IVector
+	{
+		return $"{vector[0].ToSvg(units, decimalPlaces)},{vector[1].ToSvg(units, decimalPlaces)}";
 	}
 }
