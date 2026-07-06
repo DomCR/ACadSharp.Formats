@@ -167,7 +167,7 @@ internal class SvgEntityWriter : CadXmlWriter
 		this.WriteEndElement();
 	}
 
-	private void writeDashes(IEnumerable<double> dashes)
+	public void WriteDashes(IEnumerable<double> dashes)
 	{
 		StringBuilder sb = new StringBuilder();
 
@@ -180,7 +180,7 @@ internal class SvgEntityWriter : CadXmlWriter
 		this.WriteAttributeString("stroke-dasharray", sb.ToString().Trim());
 	}
 
-	private void writeDashes(LineType lineType, double pointSize)
+	public void WriteDashes(LineType lineType, double pointSize)
 	{
 		StringBuilder sb = new StringBuilder();
 		foreach (LineType.Segment segment in lineType.Segments)
@@ -303,7 +303,7 @@ internal class SvgEntityWriter : CadXmlWriter
 
 		if (drawStroke)
 		{
-			this.WriteAttributeString("stroke", this.colorSvg(color));
+			this.WriteAttributeString("stroke", this.ColorSvg(color));
 		}
 		else
 		{
@@ -318,7 +318,7 @@ internal class SvgEntityWriter : CadXmlWriter
 		LineType lt = entity.GetActiveLineType();
 		if (this.drawableLineType(lt))
 		{
-			this.writeDashes(lt, this.getPointSize(entity));
+			this.WriteDashes(lt, this.getPointSize(entity));
 		}
 	}
 
@@ -421,12 +421,12 @@ internal class SvgEntityWriter : CadXmlWriter
 			//this.WriteAttributeString("x2", 1.0d.ToSvg(this.Units));
 			//this.WriteAttributeString("y2", (item.LineOffset / 2).ToSvg(this.Units));
 
-			this.WriteAttributeString("stroke", this.colorSvg(hatch.GetActiveColor()));
+			this.WriteAttributeString("stroke", this.ColorSvg(hatch.GetActiveColor()));
 			this.WriteAttributeString("stroke-width", $"{this.Configuration.GetLineWeightValue(hatch.GetActiveLineWeightType(), this.Units).ToSvg(UnitsType.Millimeters)}");
 
 			if (item.DashLengths.Any())
 			{
-				this.writeDashes(item.DashLengths);
+				this.WriteDashes(item.DashLengths);
 			}
 
 			//Line
@@ -498,7 +498,7 @@ internal class SvgEntityWriter : CadXmlWriter
 		this.WriteAttributeString("cx", point.Location.X);
 		this.WriteAttributeString("cy", point.Location.Y);
 
-		this.WriteAttributeString("fill", this.colorSvg(point.GetActiveColor()));
+		this.WriteAttributeString("fill", this.ColorSvg(point.GetActiveColor()));
 
 		this.WriteEndElement();
 	}
@@ -532,7 +532,7 @@ internal class SvgEntityWriter : CadXmlWriter
 
 		string pts = this.svgPoints([solid.FirstCorner, solid.SecondCorner, solid.ThirdCorner, solid.FourthCorner], transform);
 		this.WriteAttributeString("points", pts);
-		this.WriteAttributeString("fill", this.colorSvg(solid.GetActiveColor()));
+		this.WriteAttributeString("fill", this.ColorSvg(solid.GetActiveColor()));
 
 		this.WriteEndElement();
 	}
@@ -548,7 +548,7 @@ internal class SvgEntityWriter : CadXmlWriter
 
 		this.WriteAttributeString("width", "100%");
 		this.WriteAttributeString("height", "100%");
-		this.WriteAttributeString("fill", this.colorSvg(hatch.Color));
+		this.WriteAttributeString("fill", this.ColorSvg(hatch.Color));
 
 		//rect
 		this.WriteEndElement();
@@ -589,7 +589,7 @@ internal class SvgEntityWriter : CadXmlWriter
 
 		this.writeTransform(translation: insert.ToPixelSize(this.Units), scale: new XYZ(1, -1, 0), rotation: text.Rotation != 0 ? text.Rotation : null);
 
-		this.WriteAttributeString("fill", this.colorSvg(text.GetActiveColor()));
+		this.WriteAttributeString("fill", this.ColorSvg(text.GetActiveColor()));
 
 		//<text x="20" y="35" class="small">My</text>
 		this.WriteStartAttribute("style");

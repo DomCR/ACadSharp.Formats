@@ -1,21 +1,21 @@
 ﻿using ACadSharp.Tables;
-using ACadSharp.Types.Units;
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Xml;
 
 namespace ACadSharp.Formats.Svg;
 
-internal class SvgStyleWriter : CadXmlWriter
+internal class SvgStyleWriter
 {
 	private readonly Dictionary<string, Layer> _layers = new();
 
 	private readonly Dictionary<string, LineType> _lineTypes = new();
 
-	public SvgStyleWriter(SvgConfiguration configuration, UnitsType units, Encoding encoding)
-		: base(configuration, units, encoding)
+	private readonly CadXmlWriter _writer;
+
+	public SvgStyleWriter(CadXmlWriter writer)
 	{
+		this._writer = writer;
 	}
 
 	public void AddLayer(Layer layer)
@@ -39,34 +39,51 @@ internal class SvgStyleWriter : CadXmlWriter
 
 	public void WriteStyles()
 	{
-		this.WriteStartElement("svg", "http://www.w3.org/2000/svg");
-		this.WriteStartElement("style");
+		this._writer.WriteStartElement("style");
 
-		this.WriteString(Environment.NewLine);
+		this._writer.WriteString(Environment.NewLine);
 		this.writeCssLine(".entity{");
 		this.writeCssLine("vector-effect: non-scaling-stroke;");
 		this.writeCssLine("}");
-		this.WriteString(Environment.NewLine);
+		this._writer.WriteString(Environment.NewLine);
 
 		foreach (var layer in this._layers.Values)
 		{
-			this.writeCssLine($".layer_{layer.Name}");
-			this.writeCssLine("{");
-			this.writeCssLine($"stroke: {this.colorSvg(layer.Color)};");
-			this.writeCssLine($"stroke-width: {this.Configuration.GetLineWeightValue(layer.LineWeight, this.Units).ToSvg(UnitsType.Millimeters)}");
+			this.writeCssLine($".layer_{layer.Name}{{");
+			this.writeCssLine($"stroke: {this._writer.ColorSvg(layer.Color)};");
+			this.writeCssLine($"stroke-width: {this._writer.WriteLineWeightValue(layer.LineWeight)};");
 			this.writeCssLine("}");
-			this.WriteString(Environment.NewLine);
+			this._writer.WriteString(Environment.NewLine);
 		}
 
-		this.WriteEndElement();
-		this.WriteEndElement();
+		if (false)
+		{
+			// It cannot get the lineweight of the entity, so the points will not be the correct size
+			foreach (var lt in this._lineTypes.Values)
+			{
+				if (lt.HasShapes)
+				{
+					continue;
+				}
+
+				this.writeCssLine($".lt_{lt.Name}{{");
+				this.writeCssLine("}");
+				this._writer.WriteString(Environment.NewLine);
+			}
+		}
+
+		this._writer.WriteEndElement();
 	}
 
 	private void writeCssLine(string line)
 	{
-		string indent = new string(this.IndentChar, this.Indentation);
-		this.WriteString(indent);
-		this.WriteString(line);
-		this.WriteString(Environment.NewLine);
+		if (this._writer.Formatting == Formatting.Indented)
+		{
+			string indent = new string(this._writer.IndentChar, this._writer.Indentation);
+			this._writer.WriteString(indent);
+		}
+
+		this._writer.WriteString(line);
+		this._writer.WriteString(Environment.NewLine);
 	}
 }

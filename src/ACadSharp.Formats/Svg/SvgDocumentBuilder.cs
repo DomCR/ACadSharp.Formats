@@ -9,7 +9,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using System.Xml;
 using System.Xml.Linq;
 
 namespace ACadSharp.Formats.Svg;
@@ -28,7 +27,7 @@ internal class SvgDocumentBuilder
 
 	private SvgEntityWriter _entitiesWriter;
 
-	private CadXmlWriter _mainWriter;
+	private CadXmlWriter _xmlWriter;
 
 	private SvgStyleWriter _styleWriter;
 
@@ -109,18 +108,18 @@ internal class SvgDocumentBuilder
 	{
 		this._styleWriter.WriteStyles();
 
-		this.mergeStream(this._styleWriter);
 		this.mergeStream(this._entitiesWriter);
 
-		this._mainWriter.WriteEndElement();
-		this._mainWriter.WriteEndDocument();
-		this._mainWriter.Close();
+		this._xmlWriter.WriteEndElement();
+		this._xmlWriter.WriteEndDocument();
+		this._xmlWriter.Close();
 	}
 
 	private void initWriters(bool isPaperSpace)
 	{
-		this._mainWriter = new CadXmlWriter(this._stream, this.Configuration, this.Units, this._encoding);
-		this._mainWriter.OnNotification += this.triggerNotification;
+		this._xmlWriter = new CadXmlWriter(this._stream, this.Configuration, this.Units, this._encoding);
+		this._xmlWriter.IsPaperSpace = isPaperSpace;
+		this._xmlWriter.OnNotification += this.triggerNotification;
 
 		this._entitiesWriter = new SvgEntityWriter(this.Configuration, this.Units, this._encoding)
 		{
@@ -128,11 +127,7 @@ internal class SvgDocumentBuilder
 		};
 		this._entitiesWriter.OnNotification += this.triggerNotification;
 
-		this._styleWriter = new SvgStyleWriter(this.Configuration, this.Units, this._encoding)
-		{
-			IsPaperSpace = isPaperSpace
-		};
-		this._styleWriter.OnNotification += this.triggerNotification;
+		this._styleWriter = new SvgStyleWriter(this._xmlWriter);
 	}
 
 	private void mergeStream(CadXmlWriter writer)
@@ -148,7 +143,7 @@ internal class SvgDocumentBuilder
 
 		foreach (XNode node in temp.Root.Nodes())
 		{
-			node.WriteTo(this._mainWriter);
+			node.WriteTo(this._xmlWriter);
 		}
 	}
 
@@ -181,33 +176,33 @@ internal class SvgDocumentBuilder
 	{
 		this.initWriters(isPaperSpace);
 
-		this._mainWriter.WriteStartDocument();
+		this._xmlWriter.WriteStartDocument();
 
-		this._mainWriter.WriteStartElement("svg");
-		this._mainWriter.WriteAttributeString("xmlns", "http://www.w3.org/2000/svg");
+		this._xmlWriter.WriteStartElement("svg");
+		this._xmlWriter.WriteAttributeString("xmlns", "http://www.w3.org/2000/svg");
 
-		this._mainWriter.WriteAttributeString("width", box.Max.X - box.Min.X, units);
-		this._mainWriter.WriteAttributeString("height", box.Max.Y - box.Min.Y, units);
+		this._xmlWriter.WriteAttributeString("width", box.Max.X - box.Min.X, units);
+		this._xmlWriter.WriteAttributeString("height", box.Max.Y - box.Min.Y, units);
 
 		if (viewBox.HasValue)
 		{
 			var vb = viewBox.Value;
-			this._mainWriter.WriteStartAttribute("viewBox");
-			this._mainWriter.WriteValue(vb.Min.X.ToPixelSize(units));
-			this._mainWriter.WriteValue(" ");
-			this._mainWriter.WriteValue(vb.Min.Y.ToPixelSize(units));
-			this._mainWriter.WriteValue(" ");
-			this._mainWriter.WriteValue(vb.LengthX.ToPixelSize(units));
-			this._mainWriter.WriteValue(" ");
-			this._mainWriter.WriteValue(vb.LengthY.ToPixelSize(units));
-			this._mainWriter.WriteEndAttribute();
+			this._xmlWriter.WriteStartAttribute("viewBox");
+			this._xmlWriter.WriteValue(vb.Min.X.ToPixelSize(units));
+			this._xmlWriter.WriteValue(" ");
+			this._xmlWriter.WriteValue(vb.Min.Y.ToPixelSize(units));
+			this._xmlWriter.WriteValue(" ");
+			this._xmlWriter.WriteValue(vb.LengthX.ToPixelSize(units));
+			this._xmlWriter.WriteValue(" ");
+			this._xmlWriter.WriteValue(vb.LengthY.ToPixelSize(units));
+			this._xmlWriter.WriteEndAttribute();
 		}
 
-		this._mainWriter.WriteAttributeString("transform", $"scale(1,-1)");
+		this._xmlWriter.WriteAttributeString("transform", $"scale(1,-1)");
 
 		if (isPaperSpace)
 		{
-			this._mainWriter.WriteAttributeString("style", "background-color:white");
+			this._xmlWriter.WriteAttributeString("style", "background-color:white");
 		}
 	}
 }

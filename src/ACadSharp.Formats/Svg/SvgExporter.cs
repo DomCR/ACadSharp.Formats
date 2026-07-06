@@ -1,7 +1,6 @@
 ﻿using ACadSharp.Objects;
 using ACadSharp.Tables;
 using System.IO;
-using System.Xml;
 
 namespace ACadSharp.Formats.Svg;
 
