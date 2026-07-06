@@ -311,17 +311,27 @@ internal class SvgEntityWriter
 		this._writer.WriteValue($"layer_{entity.Layer.Name}");
 		this._writer.WriteEndAttribute();
 
-		if (drawStroke)
+		StringBuilder style = new StringBuilder();
+
+		if (!drawStroke)
 		{
-			_writer.WriteAttributeString("stroke", this._writer.ColorSvg(color));
+			style.Append($"stroke:none;");
 		}
-		else
+		else if (!entity.Color.IsByLayer)
 		{
-			_writer.WriteAttributeString("stroke", "none");
+			style.Append($"stroke:{this._writer.ColorSvg(color)};");
 		}
 
 		var lineWeight = entity.GetActiveLineWeightType();
-		_writer.WriteAttributeString("stroke-width", $"{this._writer.LineWeightValueToSvg(lineWeight)}");
+		if (entity.LineWeight != LineWeightType.ByLayer)
+		{
+			style.Append($"stroke-width: {this._writer.LineWeightValueToSvg(lineWeight)};");
+		}
+
+		if (style.Length > 0)
+		{
+			this._writer.WriteAttributeString("style", style.ToString());
+		}
 
 		this.writeTransform(transform);
 
