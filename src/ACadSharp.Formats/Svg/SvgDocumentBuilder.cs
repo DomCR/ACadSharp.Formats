@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace ACadSharp.Formats.Svg;
 
@@ -105,8 +107,9 @@ internal class SvgDocumentBuilder
 
 	private void endDocument()
 	{
-		this.mergeStream(this._styleWriter);
+		this._styleWriter.WriteStyles();
 
+		this.mergeStream(this._styleWriter);
 		this.mergeStream(this._entitiesWriter);
 
 		this._mainWriter.WriteEndElement();
@@ -125,7 +128,10 @@ internal class SvgDocumentBuilder
 		};
 		this._entitiesWriter.OnNotification += this.triggerNotification;
 
-		this._styleWriter = new SvgStyleWriter(this.Configuration, this.Units, this._encoding);
+		this._styleWriter = new SvgStyleWriter(this.Configuration, this.Units, this._encoding)
+		{
+			IsPaperSpace = isPaperSpace
+		};
 		this._styleWriter.OnNotification += this.triggerNotification;
 	}
 
@@ -133,10 +139,16 @@ internal class SvgDocumentBuilder
 	{
 		writer.Flush();
 		writer.BaseStream.Position = 0;
-		using (StreamReader sr = new StreamReader(writer.BaseStream))
+
+		XDocument temp = XDocument.Load(writer.BaseStream, LoadOptions.None);
+		if (temp.Root is null)
 		{
-			this._mainWriter.WriteRaw(sr.ReadToEnd());
-			this._mainWriter.WriteRaw(Environment.NewLine);
+			return;
+		}
+
+		foreach (XNode node in temp.Root.Nodes())
+		{
+			node.WriteTo(this._mainWriter);
 		}
 	}
 
@@ -147,10 +159,14 @@ internal class SvgDocumentBuilder
 
 	private void processEntities(IEnumerable<Entity> entities, Transform transform)
 	{
+		this._entitiesWriter.WriteStartElement("svg", "http://www.w3.org/2000/svg");
+
 		foreach (var entity in entities)
 		{
 			this.processEntity(entity, transform);
 		}
+
+		this._entitiesWriter.WriteEndElement();
 	}
 
 	private void processEntity(Entity entity, Transform transform)

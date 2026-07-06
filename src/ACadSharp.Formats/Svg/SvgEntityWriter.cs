@@ -15,16 +15,13 @@ namespace ACadSharp.Formats.Svg;
 
 internal class SvgEntityWriter : CadXmlWriter
 {
-	public bool IsPaperSpace { get; set; } = false;
-
-	public SvgEntityWriter(SvgConfiguration configuration, UnitsType units, Encoding encoding) : base(configuration, units, encoding)
+	public SvgEntityWriter(SvgConfiguration configuration, UnitsType units, Encoding encoding)
+		: base(configuration, units, encoding)
 	{
 	}
 
 	public void WriteEntity(Entity entity, Transform transform)
 	{
-		this.WriteComment($"{entity.ObjectName} | {entity.Handle}");
-
 		switch (entity)
 		{
 			case Arc arc:
@@ -67,16 +64,6 @@ internal class SvgEntityWriter : CadXmlWriter
 				this.notify($"[{entity.ObjectName}] Entity not implemented.", NotificationType.NotImplemented);
 				break;
 		}
-	}
-
-	protected string colorSvg(Color color)
-	{
-		if (this.IsPaperSpace && color.Equals(Color.Default))
-		{
-			color = Color.Black;
-		}
-
-		return $"rgb({color.R},{color.G},{color.B})";
 	}
 
 	private string createPath(params IEnumerable<IPolyline> polylines)
@@ -306,7 +293,13 @@ internal class SvgEntityWriter : CadXmlWriter
 	{
 		Color color = entity.GetActiveColor();
 
-		this.WriteAttributeString("vector-effect", "non-scaling-stroke");
+		this.WriteAttributeString("id", entity.Handle.ToString());
+
+		this.WriteStartAttribute("class");
+		this.WriteValue("entity");
+		this.WriteValue(" ");
+		this.WriteValue($"layer_{entity.Layer.Name}");
+		this.WriteEndAttribute();
 
 		if (drawStroke)
 		{
