@@ -1,15 +1,38 @@
 ﻿using ACadSharp.Extensions;
-using ACadSharp.IO;
 using ACadSharp.Types.Units;
 using System;
+using System.Xml;
 
 namespace ACadSharp.Formats.Svg;
 
 /// <summary>
 /// Configuration for writing SVG files.
 /// </summary>
-public class SvgConfiguration : CadWriterConfiguration
+public class SvgConfiguration
 {
+	/// <summary>
+	/// Number of points to use when drawing arcs and circles.
+	/// </summary>
+	public int ArcPoints { get; set; } = 256;
+
+	/// <summary>
+	/// Number of decimal places to use when writing numbers in the SVG file.
+	/// </summary>
+	public int DecimalPlaces { get; set; } = 2;
+
+	/// <summary>
+	/// Weight value for the <see cref="LineWeightType.Default"/>.
+	/// </summary>
+	/// <value>
+	/// Value must be in mm.
+	/// </value>
+	public double DefaultLineWeight { get; set; } = 0.01;
+
+	/// <summary>
+	/// Gets or sets the <see cref="System.Xml.Formatting"/> for the XML output.
+	/// </summary>
+	public Formatting Formatting { get; set; } = Formatting.Indented;
+
 	/// <summary>
 	/// The <see cref="LineWeightType"/> will be divided by this value to process the stroke-width in the svg when the units are <see cref="UnitsType.Unitless"/>.
 	/// </summary>
@@ -19,22 +42,12 @@ public class SvgConfiguration : CadWriterConfiguration
 	public double LineWeightRatio { get; set; } = 100;
 
 	/// <summary>
-	/// Weight value for the <see cref="LineWeightType.Default"/>. 
-	/// </summary>
-	/// <value>
-	/// Value must be in mm.
-	/// </value>
-	public double DefaultLineWeight { get; set; } = 0.01;
-
-	/// <summary>
 	/// Radius applied for the points.
 	/// </summary>
 	/// <remarks>
 	/// In svg the points will be drawn as circles.
 	/// </remarks>
 	public double PointRadius { get; set; } = 0.1;
-
-	public int ArcPoints { get; set; } = 256;
 
 	/// <summary>
 	/// Get the value of the stroke-width in mm.
