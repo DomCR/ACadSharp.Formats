@@ -39,6 +39,8 @@ jobs:
     - uses: cardinalby/export-env-action@v2
       with:
         envFile: 'github.env'
+    - name: Setup submodules
+      run: git submodule update --init --recursive  
     - name: Install dependencies
       run: dotnet restore
     - name: Build
@@ -57,6 +59,8 @@ jobs:
     - uses: cardinalby/export-env-action@v2
       with:
         envFile: 'github.env'
+    - name: Setup submodules
+      run: git submodule update --init --recursive  
     - name: Install dependencies
       run: dotnet restore
     - name: Build
