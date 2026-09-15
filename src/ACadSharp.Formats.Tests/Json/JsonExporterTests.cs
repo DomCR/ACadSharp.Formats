@@ -1,42 +1,138 @@
-﻿#if NET
+﻿using CSMath;
+using Xunit;
 using ACadSharp.Entities;
-using ACadSharp.Formats.Json;
-using ACadSharp.Formats.Json.Converters;
-using CSMath;
+using Xunit.Abstractions;
+using System;
+using ACadSharp.Tables;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Xunit;
+using ACadSharp.Formats.Json;
+using ACadSharp.Formats.Tests.Common;
 
 namespace ACadSharp.Formats.Tests.Json;
 
-public class JsonExporterTests
+public class CadJsonSerializerTests
 {
-	[Fact]
-	public void EntityToJsonTest()
-	{
-		Line line = new Line(new XYZ(0, 0, 0), new XYZ(10, 10, 0));
+	public static readonly TheoryData<Type> EntityTypes = new TheoryData<Type>();
 
-		string json = CadJsonSerializer.Serialize(line, new JsonSerializerOptions
+	private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		WriteIndented = true,
+	};
+
+	private readonly ITestOutputHelper _output;
+
+	static CadJsonSerializerTests()
+	{
+		var d = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.ManifestModule.Name == "ACadSharp.dll");
+		foreach (var item in d.GetTypes().Where(i => !i.IsAbstract && i.IsPublic))
 		{
-			IgnoreReadOnlyProperties = true,
-			IgnoreReadOnlyFields = true,
-		});
+			if (item.IsSubclassOf(typeof(Entity)) && item.GetConstructor(Array.Empty<Type>()) != null)
+			{
+				EntityTypes.Add(item);
+			}
+		}
+	}
+
+	public CadJsonSerializerTests(ITestOutputHelper output)
+	{
+		this._output = output;
+	}
+
+	[Fact]
+	public void BlockRecordToJsonTest()
+	{
+		BlockRecord blk = new BlockRecord("my_block");
+		blk.Entities.Add(new Line(new XYZ(0, 0, 0), new XYZ(10, 10, 0)));
+
+		string json = CadJsonSerializer.Serialize(blk, this._jsonOptions);
 
 		JsonObject obj = JsonNode.Parse(json).AsObject();
 
+		this._output.WriteLine(json);
 		this.assertCadObjectJson(obj);
+	}
 
-		Assert.True(obj.ContainsKey(nameof(Line.StartPoint)));
-		Assert.True(obj.ContainsKey(nameof(Line.EndPoint)));
+	[Fact]
+	public void CadDocumentToJsonTest()
+	{
+		CadDocument doc = new();
+		doc.Entities.Add(new Line(new XYZ(0, 0, 0), new XYZ(10, 10, 0)));
+
+		string json = CadJsonSerializer.Serialize(doc, this._jsonOptions);
+
+		JsonObject obj = JsonNode.Parse(json).AsObject();
+
+		this._output.WriteLine(json);
+	}
+
+	[Theory]
+	[MemberData(nameof(EntityTypes))]
+	public void EntityToJsonTest(Type type)
+	{
+		Entity entity = (Entity)Factory.CreateObject(type);
+
+		string json = CadJsonSerializer.Serialize(entity, this._jsonOptions);
+
+		JsonObject obj = JsonNode.Parse(json).AsObject();
+
+		this._output.WriteLine(json);
+		this.assertCadObjectJson(obj);
+		this.assertEntityJson(obj);
+	}
+
+	[Fact]
+	public void JsonToCadDocumentTest()
+	{
+		CadDocument doc = new();
+		doc.Entities.Add(new Line(new XYZ(0, 0, 0), new XYZ(10, 10, 0)));
+
+		string json = CadJsonSerializer.Serialize(doc, this._jsonOptions);
+
+		JsonObject obj = JsonNode.Parse(json).AsObject();
+
+		this._output.WriteLine(json);
+
+		var result = Formats.Json.CadJsonSerializer.DeserializeDocument(json);
+	}
+
+	[Theory]
+	[MemberData(nameof(EntityTypes))]
+	public void JsonToEntityTest(Type type)
+	{
+		Entity entity = (Entity)Factory.CreateObject(type);
+
+		string json = Formats.Json.CadJsonSerializer.Serialize(entity, this._jsonOptions);
+
+		JsonObject obj = JsonNode.Parse(json).AsObject();
+
+		this._output.WriteLine(json);
+
+		var cadobj = Formats.Json.CadJsonSerializer.Deserialize(json, type);
+
+		Assert.Equal(type, cadobj.GetType());
+		//EntityComparator.Equals(entity, (Entity)cadobj);
 	}
 
 	private void assertCadObjectJson(JsonObject obj)
 	{
-		Assert.True(obj.ContainsKey(nameof(CadObject.Document)));
-		Assert.True(obj.ContainsKey(nameof(CadObject.ExtendedData)));
+		Assert.True(obj.ContainsKey(nameof(CadObject.ObjectName)));
+		Assert.True(obj.ContainsKey(nameof(CadObject.SubclassMarker)));
 		Assert.True(obj.ContainsKey(nameof(CadObject.Handle)));
 		Assert.True(obj.ContainsKey(nameof(CadObject.Owner)));
 		Assert.True(obj.ContainsKey(nameof(CadObject.XDictionary)));
 	}
+
+	private void assertEntityJson(JsonObject obj)
+	{
+		Assert.True(obj.ContainsKey(nameof(Entity.Layer)));
+		Assert.True(obj.ContainsKey(nameof(Entity.Color)));
+		Assert.True(obj.ContainsKey(nameof(Entity.IsInvisible)));
+		Assert.True(obj.ContainsKey(nameof(Entity.LineType)));
+		Assert.True(obj.ContainsKey(nameof(Entity.LineTypeScale)));
+		Assert.True(obj.ContainsKey(nameof(Entity.LineWeight)));
+		Assert.True(obj.ContainsKey(nameof(Entity.Material)));
+		Assert.True(obj.ContainsKey(nameof(Entity.Transparency)));
+	}
 }
-#endif
