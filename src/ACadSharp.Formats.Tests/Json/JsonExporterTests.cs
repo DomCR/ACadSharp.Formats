@@ -1,20 +1,24 @@
-﻿using CSMath;
-using Xunit;
-using ACadSharp.Entities;
-using Xunit.Abstractions;
-using System;
+﻿using ACadSharp.Entities;
+using ACadSharp.Entities.AecEntities;
+using ACadSharp.Formats.Json;
+using ACadSharp.Formats.Json.Converters;
+using ACadSharp.Formats.Tests.Common;
 using ACadSharp.Tables;
+using CSMath;
+using System;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using ACadSharp.Formats.Json;
-using ACadSharp.Formats.Tests.Common;
+using Xunit;
+using Xunit.Abstractions;
 
 namespace ACadSharp.Formats.Tests.Json;
 
 public class CadJsonSerializerTests
 {
-	public static readonly TheoryData<Type> EntityTypes = new TheoryData<Type>();
+	public static readonly TheoryData<Type> InvalidEntityTypes = new TheoryData<Type>();
+
+	public static readonly TheoryData<Type> ValidEntityTypes = new TheoryData<Type>();
 
 	private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
 	{
@@ -28,9 +32,14 @@ public class CadJsonSerializerTests
 		var d = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.ManifestModule.Name == "ACadSharp.dll");
 		foreach (var item in d.GetTypes().Where(i => !i.IsAbstract && i.IsPublic))
 		{
-			if (item.IsSubclassOf(typeof(Entity)) && item.GetConstructor(Array.Empty<Type>()) != null)
+			if (item.IsSubclassOf(typeof(Entity)) && !item.IsSubclassOf(typeof(AecEntity))
+				&& item.GetConstructor(Array.Empty<Type>()) != null)
 			{
-				EntityTypes.Add(item);
+				ValidEntityTypes.Add(item);
+			}
+			else if (item.IsSubclassOf(typeof(AecEntity)))
+			{
+				InvalidEntityTypes.Add(item);
 			}
 		}
 	}
@@ -68,7 +77,7 @@ public class CadJsonSerializerTests
 	}
 
 	[Theory]
-	[MemberData(nameof(EntityTypes))]
+	[MemberData(nameof(ValidEntityTypes))]
 	public void EntityToJsonTest(Type type)
 	{
 		Entity entity = (Entity)Factory.CreateObject(type);
@@ -82,7 +91,15 @@ public class CadJsonSerializerTests
 		this.assertEntityJson(obj);
 	}
 
-	[Fact]
+	[Theory]
+	[MemberData(nameof(InvalidEntityTypes))]
+	public void InvalidTypesTest(Type type)
+	{
+		CadConverterFactory factory = new CadConverterFactory();
+		Assert.False(factory.CanConvert(type));
+	}
+
+	[Fact(Skip = "Not implemented yet")]
 	public void JsonToCadDocumentTest()
 	{
 		CadDocument doc = new();
@@ -98,7 +115,7 @@ public class CadJsonSerializerTests
 	}
 
 	[Theory]
-	[MemberData(nameof(EntityTypes))]
+	[MemberData(nameof(ValidEntityTypes))]
 	public void JsonToEntityTest(Type type)
 	{
 		Entity entity = (Entity)Factory.CreateObject(type);

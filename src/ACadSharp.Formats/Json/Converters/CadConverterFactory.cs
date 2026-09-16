@@ -1,4 +1,5 @@
 ﻿using ACadSharp.Entities;
+using ACadSharp.Entities.AecEntities;
 using ACadSharp.Header;
 using System;
 using System.Collections.Generic;
@@ -7,6 +8,9 @@ using System.Text.Json.Serialization;
 
 namespace ACadSharp.Formats.Json.Converters;
 
+/// <summary>
+/// A factory for creating JSON converters for CAD objects.
+/// </summary>
 public class CadConverterFactory : JsonConverterFactory
 {
 	private readonly Dictionary<Type, JsonConverter> _converters = new()
@@ -23,6 +27,11 @@ public class CadConverterFactory : JsonConverterFactory
 	/// <inheritdoc/>
 	public override bool CanConvert(Type typeToConvert)
 	{
+		if(typeToConvert.IsSubclassOf(typeof(AecEntity)))
+		{
+			return false;
+		}
+
 		return typeToConvert.IsSubclassOf(typeof(CadObject))
 			|| _converters.ContainsKey(typeToConvert);
 	}
