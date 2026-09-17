@@ -19,7 +19,7 @@ public abstract class ExporterBase : IExporter
 	/// <summary>
 	/// The output stream for the exported data.
 	/// </summary>
-	protected readonly Stream _stream;
+	protected readonly Stream stream;
 
 	/// <summary>
 	/// Initializes a new instance of the <see cref="ExporterBase"/> class.
@@ -27,13 +27,13 @@ public abstract class ExporterBase : IExporter
 	/// <param name="stream">The stream to write the exported data to.</param>
 	protected ExporterBase(Stream stream)
 	{
-		this._stream = stream;
+		this.stream = stream;
 	}
 
 	/// <inheritdoc/>
 	public void Dispose()
 	{
-		this._stream.Dispose();
+		this.stream.Dispose();
 	}
 
 	/// <summary>
