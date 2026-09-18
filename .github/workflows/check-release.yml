@@ -24,6 +24,6 @@ jobs:
     - name: Setup submodules
       run: git submodule update --init --recursive
     - name: Install dependencies
-      run: dotnet restore --configuration Release
+      run: dotnet restore
     - name: Build with Release configuration
       run: dotnet build --no-restore --configuration Release
