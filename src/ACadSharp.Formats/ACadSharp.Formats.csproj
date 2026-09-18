@@ -23,6 +23,13 @@
 		<AssemblyOriginatorKeyFile>../ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<None Include="..\..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+
 	<ItemGroup Condition="'$(Configuration)' != 'Release'">
 		<ProjectReference Include="..\ACadSharp\src\ACadSharp\ACadSharp.csproj" />
 	</ItemGroup>
