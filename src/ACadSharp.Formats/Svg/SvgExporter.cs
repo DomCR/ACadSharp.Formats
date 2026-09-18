@@ -60,7 +60,7 @@ public class SvgExporter : ExporterBase
 
 	private void createBuilder()
 	{
-		this._builder = new SvgDocumentBuilder(this._stream, this.Configuration);
+		this._builder = new SvgDocumentBuilder(this.stream, this.Configuration);
 		this._builder.OnNotification += this.triggerNotification;
 	}
 }

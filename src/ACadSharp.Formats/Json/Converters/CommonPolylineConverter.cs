@@ -1,5 +1,4 @@
 ﻿using ACadSharp.Entities;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.Json;

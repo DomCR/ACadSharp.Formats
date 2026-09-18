@@ -1,5 +1,4 @@
-﻿using ACadSharp.Entities;
-using CSUtilities.Extensions;
+﻿using CSUtilities.Extensions;
 using System;
 using System.Collections;
 using System.Linq;

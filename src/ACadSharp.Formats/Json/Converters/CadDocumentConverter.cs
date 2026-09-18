@@ -1,5 +1,4 @@
-﻿using ACadSharp.Formats.Json;
-using ACadSharp.Header;
+﻿using ACadSharp.Header;
 using System;
 using System.Reflection;
 using System.Text.Json;

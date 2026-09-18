@@ -1,0 +1,354 @@
+﻿using ACadSharp.Entities;
+using ACadSharp.Extensions;
+using ACadSharp.Formats.Pdf.Core;
+using ACadSharp.Formats.Pdf.Extensions;
+using ACadSharp.IO;
+using ACadSharp.Objects;
+using ACadSharp.Tables;
+using CSMath;
+using CSMath.Extensions;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+#if NETFRAMEWORK
+using CSUtilities.Extensions;
+#endif
+
+namespace ACadSharp.Formats.Pdf;
+
+internal class PdfPen
+{
+	public double DenominatorScale { get { return this._layout.DenominatorScale; } }
+
+	public PlotPaperUnits PaperUnits { get { return this._layout.PaperUnits; } }
+
+	// The κ (kappa) for drawing a circle or an ellipse with four Bézier splines, specifying the
+	// distance of the influence point from the starting or end point of a spline.
+	// Petzold: 4/3 * tan(α / 4)
+	// κ := 4/3 * (1 - cos(-π/4)) / sin(π/4)) <=> 4/3 * (sqrt(2) - 1) <=> 4/3 * tan(π/8)
+	// ReSharper disable once InconsistentNaming
+	public const double κ = 0.5522847498307933984022516322796;
+
+	private readonly PdfConfiguration _configuration;
+
+	private readonly Layout _layout;
+
+	private readonly StringBuilder _sb = new();
+
+	public PdfPen(Layout layout, PdfConfiguration configuration)
+	{
+		this._layout = layout;
+		this._configuration = configuration;
+	}
+
+	public void DrawEntity(Entity entity)
+	{
+		this.DrawEntity(entity, new Transform());
+	}
+
+	public void DrawEntity(Entity entity, Transform transform)
+	{
+		this.writeEntityHeader(entity);
+
+		this.applyStyle(entity);
+
+		switch (entity)
+		{
+			case Arc arc:
+				this.drawArc(arc, transform);
+				break;
+			case Circle circle:
+				this.drawCircle(circle, transform);
+				break;
+			case Ellipse ellipse:
+				this.drawEllpise(ellipse, transform);
+				break;
+			case Hatch hatch:
+				this.drawHatch(hatch, transform);
+				break;
+			case Line line:
+				this.drawLine(line, transform);
+				break;
+			case Point point:
+				this.drawPoint(point, transform);
+				break;
+			case IPolyline polyline:
+				this.drawPolyline(polyline, transform);
+				break;
+			case IText text:
+				this.drawText(text, transform);
+				break;
+			case Viewport viewport:
+				this.drawViewport(viewport);
+				break;
+			default:
+				this._configuration.Notify($"[{entity.SubclassMarker}] Drawing not implemented.", NotificationType.NotImplemented);
+				break;
+		}
+
+		this.writeEntityEnd(entity);
+	}
+
+	public override string ToString()
+	{
+		return this._sb.ToString();
+	}
+
+	private void appendArray(string key, params double[] arr)
+	{
+		this._sb.AppendJoin(" ", arr.Select(d => this.toPdfDouble(d)));
+		this._sb.AppendLine($" {key}");
+	}
+
+	private void appendPath(params XY[] vertices)
+	{
+		this.appendXY(vertices[0], PdfKey.BeginPath);
+
+		for (int i = 1; vertices.Length > i; i++)
+		{
+			this.appendXY(vertices[i], PdfKey.Line);
+		}
+
+		this.appendXY(vertices[vertices.Length - 1], PdfKey.Stroke);
+	}
+
+	private void appendXY(double x, double y, string key)
+	{
+		this._sb.AppendLine($"{this.toPdfDouble(x)} {this.toPdfDouble(y)} {key}");
+	}
+
+	private void appendXY(IVector value, string key)
+	{
+		this.appendXY(value[0], value[1], key);
+	}
+
+	private void applyStyle(Entity entity)
+	{
+		LineWeightType lw = entity.GetActiveLineWeightType();
+		double lwValue = lw.GetLineWeightValue();
+		this._sb.AppendLine($"{lwValue.ToPdfUnit(PdfUnitType.Millimeter)} {PdfKey.LineWidth}");
+
+		Color color = entity.GetActiveColor();
+
+		if (color.Index == 7)
+		{
+			color = new Color(0, 0, 0);
+		}
+
+		this._sb.AppendLine(color.ToPdfString());
+
+		LineType lt = entity.GetActiveLineType();
+		if (this.drawableLineType(lt))
+		{
+			this.writeDashes(entity.GetActiveLineType(), lwValue.ToPdfUnit(PdfUnitType.Millimeter));
+		}
+		else
+		{
+			this._sb.AppendLine("[] 0 d");
+		}
+	}
+
+	private bool drawableLineType(LineType lineType)
+	{
+		return lineType.IsComplex && !lineType.HasShapes;
+	}
+
+	private void drawArc(Arc arc, Transform transform)
+	{
+		XY[] vertices = arc.PolygonalVertexes(this._configuration.ArcPrecision)
+			.Select(v => transform.ApplyTransform(v))
+			.Select(v => v.Convert<XY>())
+			.ToArray();
+
+		this.appendPath(vertices);
+	}
+
+	private void drawCircle(Circle circle, Transform transform)
+	{
+		BoundingBox rect = circle.GetBoundingBox();
+
+		var min = transform.ApplyTransform(rect.Min);
+
+		double δx = transform.Scale.X * circle.Radius;
+		double δy = transform.Scale.Y * circle.Radius;
+
+		double fx = δx * κ;
+		double fy = δy * κ;
+		double x0 = min.X + δx;
+		double y0 = min.Y + δy;
+
+		this.appendXY(x0 + δx, y0, PdfKey.BeginPath);
+		this.appendArray(PdfKey.Arc, x0 + δx, y0 + fy, x0 + fx, y0 + δy, x0, y0 + δy);
+		this.appendArray(PdfKey.Arc, x0 - fx, y0 + δy, x0 - δx, y0 + fy, x0 - δx, y0);
+		this.appendArray(PdfKey.Arc, x0 - δx, y0 - fy, x0 - fx, y0 - δy, x0, y0 - δy);
+		this.appendArray(PdfKey.Arc, x0 + fx, y0 - δy, x0 + δx, y0 - fy, x0 + δx, y0);
+		this._sb.AppendLine($"h {PdfKey.Stroke}");
+	}
+
+	private void drawEllpise(Ellipse ellipse, Transform transform)
+	{
+		XY[] vertices = ellipse.PolygonalVertexes(this._configuration.ArcPrecision)
+			.Select(v => transform.ApplyTransform(v))
+			.Select(v => v.Convert<XY>())
+			.ToArray();
+
+		this.appendPath(vertices);
+	}
+
+	private void drawHatch(Hatch hatch, Transform transform)
+	{
+		var lines = hatch.ExplodePattern();
+
+		foreach (var line in lines)
+		{
+			this.DrawEntity(line, transform);
+		}
+
+		//throw new NotImplementedException();
+	}
+
+	private void drawLine(Line line, Transform transform)
+	{
+		this.appendXY(transform.ApplyTransform(line.StartPoint), PdfKey.BeginPath);
+		this.appendXY(transform.ApplyTransform(line.EndPoint), PdfKey.Line);
+
+		this._sb.AppendLine(PdfKey.Stroke);
+	}
+
+	private void drawPoint(Point point, Transform transform)
+	{
+		double diff = this._configuration.DotSize / 2;
+		XYZ p = transform.ApplyTransform(point.Location) - new XYZ(diff);
+
+		this._sb.AppendLine($"{this.toPdfDouble(p.X)} {this.toPdfDouble(p.Y)} {this.toPdfDouble(this._configuration.DotSize)} {this.toPdfDouble(this._configuration.DotSize)} re");
+		this._sb.AppendLine($"F");
+	}
+
+	private void drawPolyline(IPolyline polyline, Transform transform)
+	{
+		IEnumerable<XYZ> vertices = polyline.GetPoints<XYZ>(this._configuration.ArcPrecision)
+			.Select(v => v = transform.ApplyTransform(v));
+
+		this.appendXY(vertices.First(), PdfKey.BeginPath);
+
+		for (int i = 1; vertices.Count() > i; i++)
+		{
+			this.appendXY(vertices.ElementAt(i), PdfKey.Line);
+		}
+
+		if (polyline.IsClosed)
+		{
+			this.appendXY(vertices.Last(), PdfKey.Line);
+			this.appendXY(vertices.First(), PdfKey.Line);
+		}
+		else
+		{
+			this.appendXY(vertices.Last(), PdfKey.Line);
+		}
+
+		this._sb.AppendLine(PdfKey.Stroke);
+	}
+
+	private void drawText(IText text, Transform transform)
+	{
+		this._sb.AppendLine(PdfKey.BasicTextStart);
+
+		this._sb.Append("/F");
+		this._sb.Append("1");   //Font id in the pdf, the font definition should be embedded
+		this._sb.Append(' ');
+		this._sb.Append(this.toPdfDouble(text.Height));
+		this._sb.Append(' ');
+		this._sb.Append(PdfKey.TypeFont);
+		this._sb.AppendLine();
+
+		this.appendXY(text.InsertPoint, "Td");
+
+		switch (text)
+		{
+			case MText mtext:
+				this._sb.AppendLine($"{this.toPdfDouble(text.Height)} TL");
+				foreach (var l in mtext.GetTextLines())
+				{
+					this._sb.AppendLine($"T* ({l}) {PdfKey.TextString}");
+				}
+				break;
+			default:
+				this._sb.AppendLine($"({text.Value}) {PdfKey.TextString}");
+				break;
+		}
+
+		this._sb.AppendLine(PdfKey.BasicTextEnd);
+	}
+
+	private void drawViewport(Viewport viewport)
+	{
+		BoundingBox box = viewport.GetBoundingBox();
+
+		this.appendXY(box.Min, PdfKey.BeginPath);
+		this.appendXY(box.Max, PdfKey.Line);
+		this._sb.AppendLine(PdfKey.Stroke);
+
+		//Draw rectangle
+		this.appendArray(PdfKey.Rectangle, box.Min.X, box.Min.Y, box.LengthX, box.LengthY);
+		this._sb.AppendLine(PdfKey.Stroke);
+
+		//Limit viewport view
+		this._sb.AppendLine(PdfKey.StackStart);
+
+		this.appendArray(PdfKey.Rectangle, box.Min.X, box.Min.Y, box.LengthX, box.LengthY);
+		this._sb.AppendLine("W n");
+
+		var modelBox = viewport.GetModelBoundingBox();
+
+		var df = modelBox.Min * viewport.ScaleFactor;
+
+		Transform transform = new Transform();
+		transform.Translation = box.Min - df;
+		transform.Scale = new XYZ(viewport.ScaleFactor);
+
+		foreach (Entity e in viewport.SelectEntities())
+		{
+			this.DrawEntity(e, transform);
+		}
+
+		this._sb.AppendLine(PdfKey.StackEnd);
+	}
+
+	private string toPdfDouble(double value)
+	{
+		return (value / this.DenominatorScale).ToPdfUnit(this.PaperUnits).ToString(this._configuration.DecimalFormat);
+	}
+
+	private void writeDashes(LineType lineType, double pointSize)
+	{
+		StringBuilder sb = new StringBuilder();
+		sb.Append("[");
+		foreach (LineType.Segment segment in lineType.Segments)
+		{
+			if (segment.IsPoint)
+			{
+				sb.Append(toPdfDouble(pointSize));
+			}
+			else
+			{
+				sb.Append(toPdfDouble(Math.Abs(segment.Length)));
+			}
+
+			sb.Append(' ');
+		}
+
+		this._sb.AppendLine($"{sb.ToString().Trim()}] 0 d");
+	}
+
+	private void writeEntityEnd(Entity entity)
+	{
+		_sb.AppendLine(PdfKey.CommentSeparator);
+	}
+
+	private void writeEntityHeader(Entity entity)
+	{
+		_sb.AppendLine($"% {entity.ObjectName} | {entity.Handle}");
+	}
+}
