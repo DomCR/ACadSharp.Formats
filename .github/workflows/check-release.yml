@@ -1,0 +1,27 @@
+name: Check Release
+
+on:
+  push:
+    branches: [ master ]
+
+defaults:
+  run:
+    working-directory: ./src
+
+jobs:
+  build:
+    name: Build with Release configuration
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - uses: cardinalby/export-env-action@v2
+      with:
+        envFile: 'github.env'
+    - name: Setup submodules
+      run: git submodule update --init --recursive
+    - name: Install dependencies
+      run: dotnet restore
+    - name: Build with Release configuration
+      run: dotnet build --no-restore --configuration Release
