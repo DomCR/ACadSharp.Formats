@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ACadSharp", "ACadSharp\src\
 EndProject
 Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "CSUtilities", "ACadSharp\src\CSUtilities\CSUtilities\CSUtilities.shproj", "{368D6335-F701-5F14-1B54-A7C33D80D0D3}"
 EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "CSMath", "ACadSharp\src\CSUtilities\CSMath\CSMath.shproj", "{411B6122-5EF6-46DB-A8F2-43E9C1841E4A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -37,12 +39,14 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{9DDEFF0C-221B-92F9-9594-1708B62AECEB} = {58993F2A-0307-4BC0-AB03-5E63EB18E976}
 		{368D6335-F701-5F14-1B54-A7C33D80D0D3} = {58993F2A-0307-4BC0-AB03-5E63EB18E976}
+		{411B6122-5EF6-46DB-A8F2-43E9C1841E4A} = {58993F2A-0307-4BC0-AB03-5E63EB18E976}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {8E9AC0F4-EDB0-4060-AD3B-17AA42714E52}
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		ACadSharp\src\CSUtilities\CSUtilities\CSUtilities.projitems*{368d6335-f701-5f14-1b54-a7c33d80d0d3}*SharedItemsImports = 13
+		ACadSharp\src\CSUtilities\CSMath\CSMath.projitems*{411b6122-5ef6-46db-a8f2-43e9c1841e4a}*SharedItemsImports = 13
 		ACadSharp\src\CSUtilities\CSMath\CSMath.projitems*{9ddeff0c-221b-92f9-9594-1708b62aeceb}*SharedItemsImports = 5
 		ACadSharp\src\CSUtilities\CSUtilities\CSUtilities.projitems*{9ddeff0c-221b-92f9-9594-1708b62aeceb}*SharedItemsImports = 5
 		CSUtilities\CSUtilities\CSUtilities.projitems*{d3e34190-8fd2-41ba-6bf1-44fc7c191acc}*SharedItemsImports = 5

@@ -62,6 +62,9 @@ internal class PdfPen
 			case Circle circle:
 				this.drawCircle(circle, transform);
 				break;
+			case Dimension dimension:
+				this.drawDimension(dimension, transform);
+				break;
 			case Ellipse ellipse:
 				this.drawEllpise(ellipse, transform);
 				break;
@@ -79,6 +82,9 @@ internal class PdfPen
 				break;
 			case IText text:
 				this.drawText(text, transform);
+				break;
+			case Solid solid:
+				this.drawSolid(solid, transform);
 				break;
 			case Viewport viewport:
 				this.drawViewport(viewport);
@@ -102,7 +108,7 @@ internal class PdfPen
 		this._sb.AppendLine($" {key}");
 	}
 
-	private void appendPath(params XY[] vertices)
+	private void appendPath(XY[] vertices, bool fill = false)
 	{
 		this.appendXY(vertices[0], PdfKey.BeginPath);
 
@@ -111,7 +117,14 @@ internal class PdfPen
 			this.appendXY(vertices[i], PdfKey.Line);
 		}
 
-		this.appendXY(vertices[vertices.Length - 1], PdfKey.Stroke);
+		if (fill)
+		{
+			this.appendXY(vertices[vertices.Length - 1], "f");
+		}
+		else
+		{
+			this.appendXY(vertices[vertices.Length - 1], PdfKey.Stroke);
+		}
 	}
 
 	private void appendXY(double x, double y, string key)
@@ -187,6 +200,19 @@ internal class PdfPen
 		this._sb.AppendLine($"h {PdfKey.Stroke}");
 	}
 
+	private void drawDimension(Dimension dimension, Transform transform)
+	{
+		if (dimension.Block == null)
+		{
+			dimension.UpdateBlock();
+		}
+
+		foreach (var item in dimension.Block.Entities)
+		{
+			this.DrawEntity(item, transform);
+		}
+	}
+
 	private void drawEllpise(Ellipse ellipse, Transform transform)
 	{
 		XY[] vertices = ellipse.PolygonalVertexes(this._configuration.ArcPrecision)
@@ -199,14 +225,23 @@ internal class PdfPen
 
 	private void drawHatch(Hatch hatch, Transform transform)
 	{
-		var lines = hatch.ExplodePattern();
+		if (hatch.IsSolid)
+		{
+			IEnumerable<IEnumerable<XY>> paths = hatch.Paths.Select(
+				p => p.GetPoints().Select(v => transform.ApplyTransform(v).Convert<XY>()));
+			foreach (var item in paths)
+			{
+				this.appendPath(item.ToArray(), true);
+			}
 
+			return;
+		}
+
+		var lines = hatch.ExplodePattern();
 		foreach (var line in lines)
 		{
 			this.DrawEntity(line, transform);
 		}
-
-		//throw new NotImplementedException();
 	}
 
 	private void drawLine(Line line, Transform transform)
@@ -249,6 +284,19 @@ internal class PdfPen
 		}
 
 		this._sb.AppendLine(PdfKey.Stroke);
+	}
+
+	private void drawSolid(Solid solid, Transform transform)
+	{
+		XY[] vertices = new XY[]
+		{
+			transform.ApplyTransform(solid.FirstCorner).Convert<XY>(),
+			transform.ApplyTransform(solid.SecondCorner).Convert<XY>(),
+			transform.ApplyTransform(solid.ThirdCorner).Convert<XY>(),
+			transform.ApplyTransform(solid.FourthCorner).Convert<XY>()
+		};
+
+		this.appendPath(vertices, true);
 	}
 
 	private void drawText(IText text, Transform transform)

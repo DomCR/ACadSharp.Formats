@@ -121,6 +121,7 @@ public class PdfExporter : ExporterBase
 	{
 		using (PdfWriter writer = new PdfWriter(this.stream, this._pdf, this.Configuration))
 		{
+			this.Configuration.OnNotification += this.triggerNotification;
 			writer.Write();
 		}
 	}

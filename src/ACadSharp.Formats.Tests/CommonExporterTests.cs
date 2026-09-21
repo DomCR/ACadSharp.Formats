@@ -1,4 +1,6 @@
-﻿using Xunit;
+﻿using ACadSharp.IO;
+using System;
+using Xunit;
 using Xunit.Abstractions;
 
 namespace ACadSharp.Formats.Tests;
@@ -27,6 +29,11 @@ public abstract class CommonExporterTests<T>
 		}
 	}
 
+	protected CommonExporterTests(ITestOutputHelper output)
+	{
+		this._output = output;
+	}
+
 	[Theory]
 	[MemberData(nameof(LayoutNames))]
 	public void ExportLayout(string name)
@@ -35,14 +42,15 @@ public abstract class CommonExporterTests<T>
 
 		using (T exporter = this.getExporter(name))
 		{
+			exporter.OnNotification += onNotification;
 			exporter.Export(layout);
 		}
 	}
 
 	protected abstract T getExporter(string name);
 
-	protected CommonExporterTests(ITestOutputHelper output)
+	private void onNotification(object sender, NotificationEventArgs e)
 	{
-		this._output = output;
+		this._output.WriteLine(e.Message);
 	}
 }

@@ -222,6 +222,11 @@ internal class SvgEntityWriter
 	{
 		_writer.WriteStartElement("g");
 
+		if (dimension.Block == null)
+		{
+			dimension.UpdateBlock();
+		}
+
 		foreach (Entity e in dimension.Block.Entities)
 		{
 			this.WriteEntity(e, transform);

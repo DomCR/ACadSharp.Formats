@@ -12,7 +12,7 @@ public static class PdfKey
 	public const string Arc = "c";
 
 	/// <summary>
-	/// End a text object, discarding the text matrix. 
+	/// End a text object, discarding the text matrix.
 	/// </summary>
 	public const string BasicTextEnd = "ET";
 
@@ -60,6 +60,8 @@ public static class PdfKey
 	/// are open shall be implicitly closed before being filled.
 	/// </summary>
 	public const string Fill = "f";
+
+	public const string FillPath = "f*";
 
 	public const string Line = "l";
 
@@ -125,6 +127,11 @@ public static class PdfKey
 	public const string TextNextLineTranslation = "TD";
 
 	/// <summary>
+	/// Show a text string.
+	/// </summary>
+	public const string TextString = "Tj";
+
+	/// <summary>
 	/// Move to the start of the next line, offset from the start of the current line by
 	/// (tx, ty). tx and ty shall denote numbers expressed in unscaled text space
 	/// units. More precisely, this operator shall perform these assignments.
@@ -140,11 +147,6 @@ public static class PdfKey
 	/// explicitly by using Tf before any text is shown.
 	/// </summary>
 	public const string TypeFont = "Tf";
-
-	/// <summary>
-	/// Show a text string. 
-	/// </summary>
-	public const string TextString = "Tj";
 
 	/// <summary>
 	/// (Optional; PDF 1.6) A positive number that shall give the size of
