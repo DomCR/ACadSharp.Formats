@@ -108,7 +108,7 @@ internal class PdfPen
 		this._sb.AppendLine($" {key}");
 	}
 
-	private void appendPath(XY[] vertices, bool fill = false)
+	private void appendPath(IVector[] vertices, bool fill = false)
 	{
 		this.appendXY(vertices[0], PdfKey.BeginPath);
 
@@ -170,10 +170,8 @@ internal class PdfPen
 
 	private void drawArc(Arc arc, Transform transform)
 	{
-		XY[] vertices = arc.PolygonalVertexes(this._configuration.ArcPrecision)
-			.Select(v => transform.ApplyTransform(v))
-			.Select(v => v.Convert<XY>())
-			.ToArray();
+		IVector[] vertices = arc.PolygonalVertexes(this._configuration.ArcPrecision)
+			.Select(v => (IVector)transform.ApplyTransform(v)).ToArray();
 
 		this.appendPath(vertices);
 	}
@@ -215,9 +213,8 @@ internal class PdfPen
 
 	private void drawEllpise(Ellipse ellipse, Transform transform)
 	{
-		XY[] vertices = ellipse.PolygonalVertexes(this._configuration.ArcPrecision)
-			.Select(v => transform.ApplyTransform(v))
-			.Select(v => v.Convert<XY>())
+		IVector[] vertices = ellipse.PolygonalVertexes(this._configuration.ArcPrecision)
+			.Select(v => (IVector)transform.ApplyTransform(v))
 			.ToArray();
 
 		this.appendPath(vertices);
@@ -227,8 +224,9 @@ internal class PdfPen
 	{
 		if (hatch.IsSolid)
 		{
-			IEnumerable<IEnumerable<XY>> paths = hatch.Paths.Select(
-				p => p.GetPoints().Select(v => transform.ApplyTransform(v).Convert<XY>()));
+			IEnumerable<IEnumerable<IVector>> paths = hatch.Paths.Select(
+				p => p.GetPoints().Select(v => (IVector)transform.ApplyTransform(v)));
+
 			foreach (var item in paths)
 			{
 				this.appendPath(item.ToArray(), true);
@@ -288,7 +286,7 @@ internal class PdfPen
 
 	private void drawSolid(Solid solid, Transform transform)
 	{
-		XY[] vertices = new XY[]
+		IVector[] vertices = new IVector[]
 		{
 			transform.ApplyTransform(solid.FirstCorner).Convert<XY>(),
 			transform.ApplyTransform(solid.SecondCorner).Convert<XY>(),
