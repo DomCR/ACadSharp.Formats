@@ -24,4 +24,4 @@ jobs:
     - name: Install dependencies
       run: dotnet restore
     - name: Build with Release configuration
-      run: dotnet build --no-restore --configuration Release
+      run: dotnet build --configuration Release
