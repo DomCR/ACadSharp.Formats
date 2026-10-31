@@ -270,7 +270,7 @@ internal partial class ImageEngine
             if (ins.Block == null) return 0;
             double s = ins.XScale; if (ins.YScale > s) s = ins.YScale; if (s < 0) s = -s;
             double cs = scaleMul * (s > 1e-9 ? s : 1.0);
-            foreach (var e in ins.Block.Entities) { double m = MaxHalfStroke(e, cs); if (m > max) max = m; }
+            foreach (var e in BlockEntitiesInFileOrder(ins.Block)) { double m = MaxHalfStroke(e, cs); if (m > max) max = m; }
             if (ins.Attributes != null) foreach (var a in ins.Attributes) { double m = MaxHalfStroke(a, scaleMul); if (m > max) max = m; }
             return max;
         }
@@ -452,27 +452,34 @@ internal partial class ImageEngine
         if (!overLimit && !forceTiles)
             return WritePngSingle(outPath, fullW, fullH, zoom, false);
 
-        // ② 超限 + 合并（PngMergeToSingle=true）且未强制网格：等比缩小到上限内，流式合并为 1 张
+        // ② 超限 + 合并（PngMergeToSingle=true）且未强制网格：合并为 1 张
         if (overLimit && _opt.PngMergeToSingle && !forceTiles)
         {
-            // 从理想（未取整）画布反解缩小系数，再以统一比例 k=zoom·f 缩小；画布向下取整保证 ≤ 上限
-            double idealW = _w * zoom, idealH = _h * zoom;
-            double f = Math.Min(PngMaxSide / idealW, PngMaxSide / idealH);
-            if (idealW * idealH > PngMaxPixels)
-                f = Math.Min(f, Math.Sqrt(PngMaxPixels / (idealW * idealH)));
-            double k = zoom * f;
-            int W = Math.Max(1, (int)Math.Floor(idealW * f));
-            int H = Math.Max(1, (int)Math.Floor(idealH * f));
-            _log($"⚠️  PNG 画布超出位图上限（初始 1:1×{F(zoom)} = {fullW}×{fullH}），已开启合并 → 统一比例缩小合并为 1 张 {W}×{H} @ {F(k)}×");
-            return WritePngSingle(outPath, W, H, k, true);
+            if (_opt.PngMergeScaleToCap)
+            {
+                // 旧行为（回退开关 PngMergeScaleToCap=true）：等比缩小到上限内合并。
+                // 从理想（未取整）画布反解缩小系数，再以统一比例 k=zoom·f 缩小；画布向下取整保证 ≤ 上限
+                double idealW = _w * zoom, idealH = _h * zoom;
+                double f = Math.Min(PngMaxSide / idealW, PngMaxSide / idealH);
+                if (idealW * idealH > PngMaxPixels)
+                    f = Math.Min(f, Math.Sqrt(PngMaxPixels / (idealW * idealH)));
+                double k = zoom * f;
+                int W = Math.Max(1, (int)Math.Floor(idealW * f));
+                int H = Math.Max(1, (int)Math.Floor(idealH * f));
+                _log($"⚠️  PNG 画布超出位图上限（初始 1:1×{F(zoom)} = {fullW}×{fullH}），已开启合并 → 统一比例缩小合并为 1 张 {W}×{H} @ {F(k)}×");
+                return WritePngSingle(outPath, W, H, k, true);
+            }
+            // P6 默认：原分辨率行流合并——合并图 = 整幅原分辨率（不缩小、不丢清晰度，内存 O(行)）
+            return WritePngNativeMerge(outPath, fullW, fullH, zoom);
         }
 
         // ③ 超限分块 / 强制网格（单图也按 1×1 瓦片）：按网格流式输出（每张 ≤ 单侧/总像素上限，不缩小、不丢清晰度）
         return WritePngTiled(outPath, fullW, fullH, zoom, zLevel);
     }
 
-    // 单图渲染（未超限原尺寸 / 超限合并缩小 共用）：建画布→清背景→逐实体光栅化→存盘。
-    // k = 统一比例（px/数据单位，kx==ky）：正常单图 = OutputZoom；合并图 = OutputZoom×缩小系数（与 SVG/PDF 同义）。
+    // 单图渲染（未超限原尺寸 / 超限缩小合并（PngMergeScaleToCap=true 回退） 共用）：建画布→清背景→逐实体光栅化→存盘。
+    // k = 统一比例（px/数据单位，kx==ky）：正常单图 = OutputZoom；缩小合并图 = OutputZoom×缩小系数（与 SVG/PDF 同义）。
+    // （P6 默认的原分辨率行流合并走 WritePngNativeMerge，不经过本方法。）
     private ImageExportResult WritePngSingle(string outPath, int W, int H, double k, bool merged)
     {
         _skippedCounts.Clear();
@@ -655,6 +662,93 @@ internal partial class ImageEngine
         return PngResult(fullW, fullH, false, zoom, tiles);
     }
 
+    // P6：原分辨率行流合并（不缩小）。网格渲染与 WritePngTiled 完全一致（同 tile 网格、同空间剔除、同光栅化参数），
+    // 但不写瓦片文件，而是把各瓦片画布按行优先喂给 PngNativeMergeWriter → 单张 fullW×fullH 原分辨率 PNG。
+    // 内存 = 当前网格行画布合计（fullW×tile×4，写器持引用到行满，与整幅总高无关）+ 1 整幅行（fullW×4）
+    //   + ≤1MB IDAT 缓冲。网格行体积由下方硬上限约束 → 整幅再高也只多“网格行数”，不多“网格行体积”。
+    private ImageExportResult WritePngNativeMerge(string outPath, int fullW, int fullH, double zoom)
+    {
+        // 瓦片边长：与 WritePngTiled 同一公式（min(PngTileSize, 单侧上限) 且 tile×tile ≤ 总像素上限）。
+        // 网格必须与瓦片路径一致：光栅化 AA 覆盖为 float 量级精度，瓦片网格不同 ⇒ 局部坐标取整路径不同
+        // ⇒ 边缘像素覆盖可差 ±1 计数（T11②“合并图=瓦片拼合逐像素一致”要求同网格）。
+        int tile = _opt.PngTileSize > 0 ? _opt.PngTileSize : 4096;
+        tile = Math.Min(tile, PngMaxSide);
+        while (tile > 1 && (long)tile * tile > PngMaxPixels) tile--;
+        // 硬 OOM 护栏：写器须持当前整网格行画布（fullW×tile×4）到行满。极宽画布下缩小 tile 使网格行
+        // ≤ PngMergeRowCapBytes（触发时网格与瓦片路径不同 → 合并图与瓦片拼合仅在 AA 边缘像素差 ±1 计数，
+        // 文档化限制；验收数据集网格行 ~350MB，不触发）。
+        const long PngMergeRowCapBytes = 512L * 1024 * 1024;
+        long maxTileForRowCap = PngMergeRowCapBytes / (Math.Max(1, fullW) * 4L);
+        if (maxTileForRowCap < tile) tile = Math.Max(1, (int)maxTileForRowCap);
+        int cols = (int)Math.Ceiling(fullW / (double)tile);
+        int rows = (int)Math.Ceiling(fullH / (double)tile);
+
+        _skippedCounts.Clear();
+        _tiledMode = true; _sprites.Clear(); // 与原分块渲染同一光栅化参数（点精灵缓存跨瓦片复用）
+        _glyphSprites.Clear(); _glyphHit = 0; _glyphMiss = 0; // 字形精灵缓存跨瓦片复用
+        _insertSprites.Clear(); _insSpriteHit = 0; _insSpriteMiss = 0; _insSpriteDirect = 0; _insSpriteMemBytes = 0;
+        _useRealTextWidth = true;
+        if (PerfOn) _swCull.Restart();
+        BuildCullData(); // 预计算顶层实体世界 AABB（含线宽/点字形安全外扩），供按瓦片空间剔除
+        if (PerfOn) _swCull.Stop();
+
+        using var writer = new PngNativeMergeWriter(outPath, fullW, fullH);
+        long renderedPairs = 0, totalPairs = 0;
+        long tileCount = 0;
+        for (int cy = 0; cy < rows && !writer.Failed; cy++)
+        {
+            int y0 = cy * tile;
+            int th = Math.Min(tile, fullH - y0);
+            for (int cx = 0; cx < cols && !writer.Failed; cx++)
+            {
+                int x0 = cx * tile;
+                int tw = Math.Min(tile, fullW - x0);
+                if (tw < 1 || th < 1) continue;
+
+                var rc = new RasterCanvas(tw, th);
+                ClearPngBg(rc);
+                _rc = rc;
+                // 整幅统一比例 = 恰好 zoom（与 WritePngTiled/WritePngSingle 严格一致），
+                // 配合 _tileOx/_tileOy 把整幅场景映射到该瓦片局部坐标系；瓦片间无缝（同一全局像素网格）。
+                _pngKx = zoom; _pngKy = zoom;
+                _tileOx = x0; _tileOy = y0;
+
+                // 空间剔除：与 WritePngTiled 逐式一致（瓦片像素 → 数据坐标矩形，Y 翻转）
+                double dx0 = _minX - _margin + x0 / (double)_pngKx;
+                double dx1 = _minX - _margin + (x0 + tw) / (double)_pngKx;
+                double dy1 = _maxY + _margin - y0 / (double)_pngKy;
+                double dy0 = _maxY + _margin - (y0 + th) / (double)_pngKy;
+                totalPairs += _topEnts != null ? _topEnts.Count : 0;
+                foreach (var ent in CulledTopEntities(dx0, dy0, dx1, dy1))
+                {
+                    EmitEntityPng(ent, null, 1.0, 7, null, null, _ltScale);
+                    renderedPairs++;
+                }
+                _rc = null;
+
+                writer.WriteTile(rc); // 行优先拼装整幅扫描线；rc 由写器持引用至本网格行拼满（随后方可 GC）
+                tileCount++;
+                if (_perfVerboseTile)
+                    _log($"   [perf] 合并瓦片({cx},{cy}) 实体已并入整幅行流");
+            }
+        }
+
+        bool ok = writer.Finish();
+        LogSkipped("PNG");
+        if (!ok)
+        {
+            try { File.Delete(outPath); } catch { /* 半成品删除失败仅告警 */ }
+            _log($"❌  PNG 原分辨率行流合并失败：{outPath}");
+            return new ImageExportResult { Success = false };
+        }
+        double skipPct = totalPairs > 0 ? 100.0 * (1 - (double)renderedPairs / totalPairs) : 0;
+        _log($"✅  PNG 原分辨率流式合并（不缩小）：{outPath}（整幅 {fullW}×{fullH} @1:1×{F(zoom)}，{cols}×{rows} 瓦片网格 {tileCount} 张行流并入，合并内存≈当前网格行 {(long)fullW * tile * 4 / 1024 / 1024}MB（与整幅总高无关）{(_transparentBg ? "，透明背景" : "")}）");
+        _log($"   空间剔除：{tileCount} 瓦片共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%）");
+        LogPerfSummary();
+        // 合并图 = 整幅原分辨率单图：MergedToSingle=true，无瓦片列表（宿主坐标 JSON 走单画布分支）
+        return PngResult(fullW, fullH, true, zoom, System.Array.Empty<ImageTile>());
+    }
+
     // 清背景（黑/白/透明）
     private void ClearPngBg(RasterCanvas rc)
     {
@@ -737,11 +831,13 @@ internal partial class ImageEngine
                     // 变宽判断看**任意**顶点 StartWidth(40) 或 ConstantWidth(43)（首顶点窄端 sw=0 的纺锤形不能漏判）；
                     // EndWidth(41) 不单独触发（闭合圆环全 sw=0/ew=常数 应走描边+bulge 弧，否则变宽路径退化成 0 宽消失）。
                     // 常数宽(43)：全顶点等宽归一形式 → 物化为逐顶点
-                    if (pl.ConstantWidth > 0 && !pl.Vertices.Any(v => v.StartWidth > 0))
+                    // [PATCH] Option B：仅当 ConstantWidthSpecified（源文件确有 43）才物化/走变宽
+                    // （与 SVG/PDF 同口径；GDB2CAD 合成的 ConstantWidth 未设 Specified，读回侧无 43）。
+                    if (pl.ConstantWidthSpecified && pl.ConstantWidth > 0 && !pl.Vertices.Any(v => v.StartWidth > 0))
                         foreach (var v in pl.Vertices) { v.StartWidth = pl.ConstantWidth; v.EndWidth = pl.ConstantWidth; }
                     // 变宽：任意顶点 起宽(40)/终宽(41) 非零 或 常数宽(43) 非零 → 走填充变宽路径；逐顶点有效宽度
                     // 由 TaperedVertexWidths 计算（正确处理"每节起点/终点线宽不等"，与 SVG/PDF 一致）。
-                    bool hasTaper = pl.Vertices.Any(v => v.StartWidth > 0 || v.EndWidth > 0) || pl.ConstantWidth > 0;
+                    bool hasTaper = pl.Vertices.Any(v => v.StartWidth > 0 || v.EndWidth > 0) || (pl.ConstantWidthSpecified && pl.ConstantWidth > 0);
                     if (hasTaper && pts.Count >= 2)
                     {
                         if (PerfOn)
@@ -1178,7 +1274,7 @@ internal partial class ImageEngine
                         short dimAci = EffectiveAci(ent, byBlockAci);
                         short dimLayerAci = 7;
                         try { dimLayerAci = LayerAciIndex(dim.Layer); } catch { }
-                        foreach (var be in dim.Block.Entities)
+                        foreach (var be in BlockEntitiesInFileOrder(dim.Block))
                         {
                             if (be is Point)
                             {
@@ -1624,7 +1720,7 @@ internal partial class ImageEngine
     private void DrawInsertGeometry(Insert ins, Transform2D tr, short insAci, double[] insDash, LtpPattern insPat, double childLtMul, short insLayerAci)
     {
         bool hasAttribs = ins.Attributes != null && ins.Attributes.Count > 0;
-        foreach (var e in ins.Block.Entities)
+        foreach (var e in BlockEntitiesInFileOrder(ins.Block))
         {
             if (hasAttribs && e is AttributeDefinition) continue;
             EmitEntityPng(e, tr, tr.Scale, insAci, insDash, insPat, childLtMul, insLayerAci);
@@ -1646,7 +1742,7 @@ internal partial class ImageEngine
     private void DrawInsertContent(Insert ins, Transform2D tr, Transform2D parent, short insAci, double[] insDash, LtpPattern insPat, double childLtMul, short insLayerAci)
     {
         bool hasAttribs = ins.Attributes != null && ins.Attributes.Count > 0;
-        foreach (var e in ins.Block.Entities)
+        foreach (var e in BlockEntitiesInFileOrder(ins.Block))
         {
             if (hasAttribs && e is AttributeDefinition) continue; // 有实际属性值 → 跳过模板默认值
             EmitEntityPng(e, tr, tr.Scale, insAci, insDash, insPat, childLtMul, insLayerAci);

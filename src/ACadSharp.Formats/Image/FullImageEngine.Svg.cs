@@ -2294,7 +2294,12 @@ internal partial class ImageEngine
     private IEnumerable<Entity> AllEntities()
     {
         if (_sortOrderCache == null)
-            _sortOrderCache = ApplySortentsOrder(_doc.ModelSpace.Entities.ToList());
+        {
+            if (_streaming)
+                _sortOrderCache = ApplySortentsOrder(_streamEnts); // P5 流式：用管线流序记录的实体列表（图框 insert 在流末=最顶层），不再读 ModelSpace
+            else
+                _sortOrderCache = ApplySortentsOrder(_doc.ModelSpace.Entities.ToList());
+        }
         foreach (var e in _sortOrderCache)
             yield return e;
     }
@@ -2328,66 +2333,89 @@ internal partial class ImageEngine
     }
 
     // 计算数据范围（含 Insert 展开后的块内实体）
+    // P5 流式：范围已在管线 Render 期间逐实体累积（_st* 字段），此处只回灌到当前视图字段，
+    // 不重扫、不重置 → 多次 Write*（多级别/多格式复用同一引擎）各自独立还原同一基础范围。
+    // 完整模式：每次全量重扫（可重入）。
     private bool ComputeExtents()
     {
-        bool any = false;
+        if (_streaming)
+        {
+            _minX = _stMinX; _minY = _stMinY; _maxX = _stMaxX; _maxY = _stMaxY;
+            return _stAny;
+        }
+        _extAny = false;
         _minX = _minY = double.MaxValue;
         _maxX = _maxY = double.MinValue;
 
+        if (_doc == null || _doc.ModelSpace?.Entities == null) return false;
+
+        foreach (var ent in AllEntities())
+            ExpandEntityExtents(ent, false);
+        return _extAny;
+    }
+
+    // 单实体范围扩展（完整模式 ComputeExtents 与流式 Render 共用，P5 自 ComputeExtents 抽出）：
+    // per-entity switch 语义与原版逐条一致（Insert 块展开、文字盒、引线过冲、OLE2 两角等），
+    // 唯一差别是扩展目标——流式累积进 _st*，完整模式写当前视图 _minX..。
+    private void ExpandEntityExtents(Entity ent, bool streaming)
+    {
         void Expand(double x, double y)
         {
-            if (x < _minX) _minX = x; if (y < _minY) _minY = y;
-            if (x > _maxX) _maxX = x; if (y > _maxY) _maxY = y;
-            any = true;
+            if (streaming)
+            {
+                if (x < _stMinX) _stMinX = x; if (y < _stMinY) _stMinY = y;
+                if (x > _stMaxX) _stMaxX = x; if (y > _stMaxY) _stMaxY = y;
+                _stAny = true;
+            }
+            else
+            {
+                if (x < _minX) _minX = x; if (y < _minY) _minY = y;
+                if (x > _maxX) _maxX = x; if (y > _maxY) _maxY = y;
+                _extAny = true;
+            }
         }
 
         void ExpandCircle(double cx, double cy, double r)
         { Expand(cx - r, cy - r); Expand(cx + r, cy + r); }
 
-        if (_doc == null || _doc.ModelSpace?.Entities == null) return false;
-
-        foreach (var ent in AllEntities())
+        switch (ent)
         {
-            switch (ent)
-            {
-                case Point pt: Expand(pt.Location.X, pt.Location.Y); break;
-                case Line ln: Expand(ln.StartPoint.X, ln.StartPoint.Y); Expand(ln.EndPoint.X, ln.EndPoint.Y); break;
-                case MLine ml:
-                    // 多线：用展开后的各子线中心线扩展 bbox（含 offset 偏移与宽度，避免漏算）
-                    foreach (var el in MLineElements(ml, null))
-                        foreach (var p in el.Center) Expand(p.X, p.Y);
-                    break;
-                case LwPolyline p2: foreach (var p in LwPolylineSamplePoints(p2, null)) Expand(p.X, p.Y); break; // 含 bulge 弧段范围
-                case Polyline3D p3: foreach (var v in p3.Vertices) if (IsDisplayVertex(v)) Expand(v.Location.X, v.Location.Y); break;
-                case Polyline2D p2d: foreach (var v in p2d.Vertices) if (IsDisplayVertex(v)) Expand(v.Location.X, v.Location.Y); break;
-                case Mesh mesh: if (mesh.Vertices != null) foreach (var v in mesh.Vertices) Expand(v.X, v.Y); break;
-                case PolyfaceMesh pf: if (pf.Vertices != null) foreach (var v in pf.Vertices) Expand(v.Location.X, v.Location.Y); break;
-                case PolygonMesh pm: if (pm.Vertices != null) foreach (var v in pm.Vertices) Expand(v.Location.X, v.Location.Y); break;
-                case Wipeout wo: foreach (var p in WipeoutWorldPoly(wo, null)) Expand(p.X, p.Y); break;
-                case Ole2Frame olef: // OLE2 嵌入对象（310 内嵌图片）：UL/LR 两角计入图幅，否则图片区域撑大画布被裁
-                    Expand(Math.Min(olef.UpperLeftCorner.X, olef.LowerRightCorner.X), Math.Min(olef.UpperLeftCorner.Y, olef.LowerRightCorner.Y));
-                    Expand(Math.Max(olef.UpperLeftCorner.X, olef.LowerRightCorner.X), Math.Max(olef.UpperLeftCorner.Y, olef.LowerRightCorner.Y));
-                    break;
-                case Arc a: ExpandCircle(a.Center.X, a.Center.Y, a.Radius); break; // 必须先于 Circle（fork 继承）
-                case Circle c: ExpandCircle(c.Center.X, c.Center.Y, c.Radius); break;
-                case Ellipse el: ExpandCircle(el.Center.X, el.Center.Y, Math.Max(el.MajorAxis, el.MinorAxis) / 2.0); break;
-                case TextEntity t: ExpandTextBox(t.InsertPoint.X, t.InsertPoint.Y, TextMetrics(t), Expand); break;
-                case MText mt: ExpandTextBox(mt.InsertPoint.X, mt.InsertPoint.Y, TextMetrics(mt), Expand); break;
-                case Solid sd:
-                    Expand(sd.FirstCorner.X, sd.FirstCorner.Y); Expand(sd.SecondCorner.X, sd.SecondCorner.Y);
-                    Expand(sd.ThirdCorner.X, sd.ThirdCorner.Y); Expand(sd.FourthCorner.X, sd.FourthCorner.Y); break;
-                case Spline sp:
-                    foreach (var p in SplineSample(sp, null, 4)) Expand(p.X, p.Y); break;
-                case Hatch ht:
-                    foreach (var loop in BuildHatchLoops(ht, null))
-                        foreach (var p in loop) Expand(p.X, p.Y); break;
-                case Insert ins: ExpandInsert(ins, Expand); break;
-                case Leader ld: // 引线全路径（样条含过冲）+ 箭头 bbox 计入图框，否则箭头/样条过冲被裁出画布
-                    ExpandLeaderExtents(ld, _doc, Expand); break;
-                default: break;
-            }
+            case Point pt: Expand(pt.Location.X, pt.Location.Y); break;
+            case Line ln: Expand(ln.StartPoint.X, ln.StartPoint.Y); Expand(ln.EndPoint.X, ln.EndPoint.Y); break;
+            case MLine ml:
+                // 多线：用展开后的各子线中心线扩展 bbox（含 offset 偏移与宽度，避免漏算）
+                foreach (var el in MLineElements(ml, null))
+                    foreach (var p in el.Center) Expand(p.X, p.Y);
+                break;
+            case LwPolyline p2: foreach (var p in LwPolylineSamplePoints(p2, null)) Expand(p.X, p.Y); break; // 含 bulge 弧段范围
+            case Polyline3D p3: foreach (var v in p3.Vertices) if (IsDisplayVertex(v)) Expand(v.Location.X, v.Location.Y); break;
+            case Polyline2D p2d: foreach (var v in p2d.Vertices) if (IsDisplayVertex(v)) Expand(v.Location.X, v.Location.Y); break;
+            case Mesh mesh: if (mesh.Vertices != null) foreach (var v in mesh.Vertices) Expand(v.X, v.Y); break;
+            case PolyfaceMesh pf: if (pf.Vertices != null) foreach (var v in pf.Vertices) Expand(v.Location.X, v.Location.Y); break;
+            case PolygonMesh pm: if (pm.Vertices != null) foreach (var v in pm.Vertices) Expand(v.Location.X, v.Location.Y); break;
+            case Wipeout wo: foreach (var p in WipeoutWorldPoly(wo, null)) Expand(p.X, p.Y); break;
+            case Ole2Frame olef: // OLE2 嵌入对象（310 内嵌图片）：UL/LR 两角计入图幅，否则图片区域撑大画布被裁
+                Expand(Math.Min(olef.UpperLeftCorner.X, olef.LowerRightCorner.X), Math.Min(olef.UpperLeftCorner.Y, olef.LowerRightCorner.Y));
+                Expand(Math.Max(olef.UpperLeftCorner.X, olef.LowerRightCorner.X), Math.Max(olef.UpperLeftCorner.Y, olef.LowerRightCorner.Y));
+                break;
+            case Arc a: ExpandCircle(a.Center.X, a.Center.Y, a.Radius); break; // 必须先于 Circle（fork 继承关系）
+            case Circle c: ExpandCircle(c.Center.X, c.Center.Y, c.Radius); break;
+            case Ellipse el: ExpandCircle(el.Center.X, el.Center.Y, Math.Max(el.MajorAxis, el.MinorAxis) / 2.0); break;
+            case TextEntity t: ExpandTextBox(t.InsertPoint.X, t.InsertPoint.Y, TextMetrics(t), Expand); break;
+            case MText mt: ExpandTextBox(mt.InsertPoint.X, mt.InsertPoint.Y, TextMetrics(mt), Expand); break;
+            case Solid sd:
+                Expand(sd.FirstCorner.X, sd.FirstCorner.Y); Expand(sd.SecondCorner.X, sd.SecondCorner.Y);
+                Expand(sd.ThirdCorner.X, sd.ThirdCorner.Y); Expand(sd.FourthCorner.X, sd.FourthCorner.Y); break;
+            case Spline sp:
+                foreach (var p in SplineSample(sp, null, 4)) Expand(p.X, p.Y); break;
+            case Hatch ht:
+                foreach (var loop in BuildHatchLoops(ht, null))
+                    foreach (var p in loop) Expand(p.X, p.Y); break;
+            case Insert ins: ExpandInsert(ins, Expand); break;
+            case Leader ld: // 引线全路径（样条含过冲）+ 箭头 bbox 计入图框，否则箭头/样条过冲被裁出画布
+                ExpandLeaderExtents(ld, _doc, Expand); break;
+            default: break;
         }
-        return any;
     }
 
     // 文字包围盒估算：TEXT/MText 若只展开基线插入点，会把 ascender/descender 裁出画布
@@ -2712,12 +2740,15 @@ internal partial class ImageEngine
                     // （用户反馈"两点间变宽没渲染"）。EndWidth(41) 不单独触发变宽（闭合圆环全 sw=0/ew=常数 应走
                     // 描边+bulge 弧，否则变宽路径会退化成 0 宽消失）。
                     // 常数宽(43)：DWG 往返常把全顶点等宽归一为 ConstantWidth（逐顶点置 0）→ 物化为逐顶点
-                    if (pl.ConstantWidth > 0 && !pl.Vertices.Any(v => v.StartWidth > 0))
+                    // [PATCH] Option B：仅当 ConstantWidthSpecified（源文件确有 43）才物化。GDB2CAD 合成
+                    // 站点只设 ConstantWidth 不设 Specified，DWG/DXF writer 也仅在 Specified 时写 43 →
+                    // 读回侧无 43、按细线渲染，live 侧必须同口径，否则 live 与读回的 SVG/PNG 字节不一致。
+                    if (pl.ConstantWidthSpecified && pl.ConstantWidth > 0 && !pl.Vertices.Any(v => v.StartWidth > 0))
                         foreach (var v in pl.Vertices) { v.StartWidth = pl.ConstantWidth; v.EndWidth = pl.ConstantWidth; }
                     // 变宽：任意顶点 起宽(40)/终宽(41) 非零，或 常数宽(43) 非零 → 走填充多边形（变宽）路径；
                     // 全 0 才按默认线宽(370)细线描边。逐顶点有效宽度由 TaperedVertexWidths 计算
                     // （顶点宽=本顶点起宽40，起宽为0时继承入段终宽41，正确处理"每节起点/终点线宽不等"）。
-                    bool hasTaper = pl.Vertices.Any(v => v.StartWidth > 0 || v.EndWidth > 0) || pl.ConstantWidth > 0;
+                    bool hasTaper = pl.Vertices.Any(v => v.StartWidth > 0 || v.EndWidth > 0) || (pl.ConstantWidthSpecified && pl.ConstantWidth > 0);
                     if (hasTaper && pts.Count >= 2)
                     {
                         EmitTaperedPolyline(sb, pl, tr, col, scaleMul, dash);
@@ -3083,7 +3114,7 @@ internal partial class ImageEngine
                         short dimAci = EffectiveAci(ent, byBlockAci);
                         short dimLayerAci = 7;
                         try { dimLayerAci = LayerAciIndex(dim.Layer); } catch { }
-                        foreach (var be in dim.Block.Entities)
+                        foreach (var be in BlockEntitiesInFileOrder(dim.Block))
                         {
                             // Defpoints 图层的 Point（定义点/锚点）不渲染
                             if (be is Point)
@@ -3370,7 +3401,8 @@ internal partial class ImageEngine
         // 实际显示用 INSERT 跟随的 ATTRIB（ins.Attributes，本次插入的真实属性值，如 "17"）。
         // 否则块定义里的默认值（如 "1"）会被当成文字画出来，覆盖真实属性值。
         bool hasAttribs = ins.Attributes != null && ins.Attributes.Count > 0;
-        foreach (var e in ins.Block.Entities)
+        // [PATCH] 按规范化文件序遍历（FileOrderEntities 优先），消除 HashSet 哈希序的跨进程漂移
+        foreach (var e in BlockEntitiesInFileOrder(ins.Block))
         {
             if (hasAttribs && e is AttributeDefinition) continue; // 有实际属性值 → 跳过模板默认值
             EmitEntitySvg(sb, e, tr, tr.Scale, insAci, insDash, insPat, childLtMul, insLayerAci);

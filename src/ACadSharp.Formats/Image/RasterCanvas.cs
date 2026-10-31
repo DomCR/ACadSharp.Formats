@@ -579,10 +579,10 @@ internal sealed class RasterCanvas
 
     // ===== PNG 编码（零依赖：ZLibStream + CRC32）=====
 
-    private static readonly byte[] _pngSig = { 137, 80, 78, 71, 13, 10, 26, 10 };
-    private static readonly uint[] _crcTable = BuildCrcTable();
+    internal static readonly byte[] _pngSig = { 137, 80, 78, 71, 13, 10, 26, 10 };
+    internal static readonly uint[] _crcTable = BuildCrcTable();
 
-    private static uint[] BuildCrcTable()
+    internal static uint[] BuildCrcTable()
     {
         var t = new uint[256];
         for (uint n = 0; n < 256; n++)
@@ -595,7 +595,7 @@ internal sealed class RasterCanvas
         return t;
     }
 
-    private static uint Crc32(byte[] data, int off, int len)
+    internal static uint Crc32(byte[] data, int off, int len)
     {
         uint c = 0xFFFFFFFF;
         for (int i = 0; i < len; i++)
@@ -603,13 +603,13 @@ internal sealed class RasterCanvas
         return c ^ 0xFFFFFFFF;
     }
 
-    private static void WriteU32(byte[] buf, int off, uint v)
+    internal static void WriteU32(byte[] buf, int off, uint v)
     {
         buf[off] = (byte)(v >> 24); buf[off + 1] = (byte)(v >> 16);
         buf[off + 2] = (byte)(v >> 8); buf[off + 3] = (byte)v;
     }
 
-    private static void WriteChunk(Stream s, string type, byte[] data)
+    internal static void WriteChunk(Stream s, string type, byte[] data)
     {
         byte[] typeBytes = Encoding.ASCII.GetBytes(type);
         byte[] len = new byte[4];
@@ -629,6 +629,10 @@ internal sealed class RasterCanvas
     /// <summary>导出 RGBA8 原始像素缓冲（长度 W*H*4，行优先，原点左上）。
     /// 供 PDF 引擎把光栅化渐变嵌入为 /Subtype /Image XObject（复用与 PNG 完全一致的填充结果）。</summary>
     public byte[] ToRgbaBuffer() => (byte[])_px.Clone();
+
+    /// <summary>返回像素行 y 的 RGBA8 视图（长度 Width*4，行优先，无拷贝）。
+    /// 供 P6 原分辨率行流合并写器（PngNativeMergeWriter）逐行拼装整幅扫描线。</summary>
+    public Span<byte> GetRow(int y) => _px.AsSpan(y * Width * 4, Width * 4);
 
     public bool SavePng(string path)
     {

@@ -48,10 +48,21 @@ public class ImageConfiguration
 
 	/// <summary>
 	/// PNG 是否「合并为一张图」（仅 PNG 光栅端生效；SVG/PDF 忽略）。
-	/// true  = 当整幅 1:1×OutputZoom 画布超出位图像素上限时，流式把各瓦片缩放合并为 1 张 PNG（等比缩小到上限内）；
+	/// true  = 当整幅 1:1×OutputZoom 画布超出位图像素上限时，按瓦片网格行优先流式合并为 1 张 PNG：
+	///          默认（PngMergeScaleToCap=false）走【原分辨率行流合并】——合并图尺寸 = 整幅原分辨率
+	///          （可超过单图像素上限，不缩小、不丢清晰度，内存 O(行)）；
+	///          PngMergeScaleToCap=true 时回退旧行为：等比缩小到上限内合并为 1 张。
 	/// false（默认）= 超出上限时按 <see cref="PngTileSize"/> 切分为多个 PNG 文件分块输出（每张 ≤ 单侧/总像素上限，不缩小、不丢清晰度）。
 	/// </summary>
 	public bool PngMergeToSingle { get; set; } = false;
+
+	/// <summary>
+	/// PNG 超限合并时是否「等比缩小到上限内」（仅 PNG 光栅端、且 PngMergeToSingle=true 且超限时生效）。
+	/// false（默认，P6 起）= 原分辨率行流合并：合并图尺寸 = 整幅原分辨率（可超过 16384/边、32M 像素上限，
+	///   逐行流式写盘，内存 O(行)，不缩小、不丢清晰度）；
+	/// true = 旧行为：统一比例等比缩小到上限内合并为 1 张（清晰度低于 OutputZoom）。
+	/// </summary>
+	public bool PngMergeScaleToCap { get; set; } = false;
 
 	/// <summary>
 	/// PNG 分块瓦片像素边长上限（仅 PNG 光栅端、且 PngMergeToSingle=false 时生效）。

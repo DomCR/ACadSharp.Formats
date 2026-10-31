@@ -2,7 +2,7 @@
 
 	<!-- [GDB2CAD PATCH] 本地克隆改造（T4：图+PDF 完全由 ACadSharp.Formats 实现）：
 	     1) 目标框架收敛为 net10.0（与 GDB2CAD/ACadSharp fork 一致；原多目标 net8/net9/net48/netstandard2.1
-        需要本仓库不存在的 ACadSharp.Formats.snk 签名密钥，SignAssembly 已移除）。
+        需要本仓库不存在的 ACadSharp.Formats.snk 签名密钥，单目标后签名要求见下方 SignAssembly 属性——fork 核心强签名 + IVT 带公钥，必须同 snk 签名，2026-11 P5 固化）。
 	     2) ACadSharp 依赖改为本地 fork 源码工程引用（原 Release 走 NuGet ACadSharp 3.8.*，
         与 fork 3.7.16 双程序集冲突，且 fork 含 100+ 补丁与 InternalsVisibleTo）。
 	     3) SHX 形状/字体解析已从外部 Fonts.Lib 迁至核心 ACadSharp.Text（ACadSharp.csproj 内），
@@ -19,6 +19,11 @@
 		<Nullable>disable</Nullable>
 		<ImplicitUsings>disable</ImplicitUsings>
 		<NoWarn>$(NoWarn);CS1591</NoWarn>
+		<!-- [GDB2CAD PATCH] 强签名（2026-11 P5）：fork 核心 ACadSharp 为强签名程序集，
+		     其 InternalsVisibleTo("ACadSharp.Formats") 带公钥 → 必须用同一 snk 签名，否则 CS0281。
+		     与 ACadSharp.Formats.Tests 共用 ../ACadSharp.Formats.snk。 -->
+		<SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>..\ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
 
 	<ItemGroup>

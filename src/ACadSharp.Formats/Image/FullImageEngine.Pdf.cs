@@ -284,7 +284,8 @@ internal partial class ImageEngine
                     // 实际显示用 INSERT 跟随的 ATTRIB（ins.Attributes，本次插入的真实属性值，如 "17"）。
                     // 否则块定义里的默认值（如 "1"）会被当成文字画出来，覆盖真实属性值。
                     bool hasAttribs = ins.Attributes != null && ins.Attributes.Count > 0;
-                    foreach (var e in ins.Block.Entities)
+                    // [PATCH] 按规范化文件序遍历（FileOrderEntities 优先），消除 HashSet 哈希序漂移
+                    foreach (var e in BlockEntitiesInFileOrder(ins.Block))
                     {
                         if (hasAttribs && e is AttributeDefinition) continue; // 有实际属性值 → 跳过模板默认值
                         EmitEntityPdf(cs, e, t, t.Scale, insAci, insDash, insPat, childLtMul, insLayerAci);
@@ -315,11 +316,13 @@ internal partial class ImageEngine
                     // 变宽判断看**任意**顶点 StartWidth(40) 或 ConstantWidth(43)（首顶点窄端 sw=0 的纺锤形不能漏判）；
                     // EndWidth(41) 不单独触发（闭合圆环全 sw=0/ew=常数 应走描边+bulge 弧，否则变宽路径退化成 0 宽消失）。
                     // 常数宽(43)：全顶点等宽归一形式 → 物化为逐顶点
-                    if (pl.ConstantWidth > 0 && !pl.Vertices.Any(v => v.StartWidth > 0))
+                    // [PATCH] Option B：仅当 ConstantWidthSpecified（源文件确有 43）才物化/走变宽
+                    // （与 SVG/PNG 同口径；GDB2CAD 合成的 ConstantWidth 未设 Specified，读回侧无 43）。
+                    if (pl.ConstantWidthSpecified && pl.ConstantWidth > 0 && !pl.Vertices.Any(v => v.StartWidth > 0))
                         foreach (var v in pl.Vertices) { v.StartWidth = pl.ConstantWidth; v.EndWidth = pl.ConstantWidth; }
                     // 变宽：任意顶点 起宽(40)/终宽(41) 非零 或 常数宽(43) 非零 → 走填充变宽路径；逐顶点有效宽度
                     // 由 TaperedVertexWidths 计算（正确处理"每节起点/终点线宽不等"，与 SVG/PNG 一致）。
-                    bool hasTaper = pl.Vertices.Any(v => v.StartWidth > 0 || v.EndWidth > 0) || pl.ConstantWidth > 0;
+                    bool hasTaper = pl.Vertices.Any(v => v.StartWidth > 0 || v.EndWidth > 0) || (pl.ConstantWidthSpecified && pl.ConstantWidth > 0);
                     if (hasTaper && pl.Vertices.Count >= 2)
                     {
                         PdfTaperedPolyline(cs, pl, tr, col, dash);
@@ -717,7 +720,7 @@ internal partial class ImageEngine
                         short dimAci = EffectiveAci(ent, byBlockAci);
                         short dimLayerAci = 7;
                         try { dimLayerAci = LayerAciIndex(dim.Layer); } catch { }
-                        foreach (var be in dim.Block.Entities)
+                        foreach (var be in BlockEntitiesInFileOrder(dim.Block))
                         {
                             if (be is Point)
                             {
