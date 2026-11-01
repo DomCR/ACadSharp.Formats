@@ -75,6 +75,27 @@ internal partial class ImageEngine
         _streamEnts.Add(e);
         ExpandEntityExtents(e, true);
     }
+
+    /// <summary>
+    /// 释放全部流式实体的 ExtendedData（XData）——P6.5 内存门禁（T11 peakWS&lt;500MB）。
+    /// 调用时序：DWG/DXF 流式写盘完成之后、任何 Write*（PNG/SVG/PDF）之前。
+    /// 安全性：XData 此时已随 DWG/DXF 流写盘（或 none 模式下本就不写）；PNG/SVG/PDF 渲染路径
+    /// 不消费实体 XData（渲染端唯一消费者是 AutoCAD 原生引线 DSTYLE 覆盖——挂在 ACAD AppId 上，
+    /// 业务转换不产生该形态）。释放后每实体仅保留几何/属性表/Attributes，显著降低图像相位存活集。
+    /// </summary>
+    /// <returns>被清空的实体数（供宿主日志）。</returns>
+    public int StripExtendedData()
+    {
+        if (_streamEnts == null) return 0;
+        int n = 0;
+        foreach (var e in _streamEnts)
+        {
+            if (e == null) continue;
+            e.ExtendedData.Clear();
+            n++;
+        }
+        return n;
+    }
 }
 
 /// <summary>
@@ -126,6 +147,14 @@ public class StreamingImageEngine
 
     /// <summary>按流序推入一个实体。范围在线累积（含 Insert 块展开与文字盒）。</summary>
     public void Render(Entity e) => _eng.Render(e);
+
+    /// <summary>
+    /// 释放全部流式实体的 XData（ExtendedData）。须在 DWG/DXF 流式写盘完成之后、
+    /// 任何 Write*（PNG/SVG/PDF）之前调用——图像渲染不消费实体 XData，释放可大幅降低
+    /// 图像相位常驻内存（P6.5 内存门禁）。
+    /// </summary>
+    /// <returns>被清空的实体数。</returns>
+    public int StripExtendedData() => _eng.StripExtendedData();
 
     /// <summary>输出 PNG（单张或 WMTS 瓦片树，由 opt.WmtsZ/PngForceTiles/尺寸上限决定）。</summary>
     public ImageExportResult WritePng(string outPath) => _eng.WritePng(outPath);

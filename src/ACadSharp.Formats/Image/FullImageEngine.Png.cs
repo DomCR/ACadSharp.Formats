@@ -412,6 +412,10 @@ internal partial class ImageEngine
 
     public ImageExportResult WritePng(string outPath)
     {
+        // P6.5：相位边界回收——前置 DWG 写出阶段留下未回收垃圾（T11 实测 PNG 入口 GC存活≈419MB，
+        // 而无图路径 peakWS 仅 268MB）。入口显式一次 gen2 回收，配合渲染循环的条带边界回收保持 WS 有界
+        // （T11 门禁 peakWS<500MB）。单次 Collect 对批处理工具是标准相位边界手法，代价 ~50-200ms。
+        GC.Collect();
         if (PerfOn) _swExt.Restart();
         if (!ComputeExtents())
         {
@@ -523,23 +527,57 @@ internal partial class ImageEngine
     // SavePng 后 rc 不再被触碰）→ 可零拷贝交后台并行「编码+写盘」，与后续瓦片光栅化重叠。
     // 背压：未完成编码任务数达上限时渲染线程等待，防 64MB/张 的像素缓冲堆积（峰值≈上限×64MB）。
     // 失败语义：任一瓦片编码/写盘失败 → FlushPngSaves 返回 false → 整次导出失败（与原同步一致）。
-    private const int PngSaveBacklog = 8;   // 未完成编码任务上限（≈512MB 像素内存峰值）
+    private const int PngSaveBacklog = 2;   // 未完成编码任务上限（≈2×64MB=128MB 像素内存峰值；P6.5：8→2 削瓦片路径 backlog 峰值 512MB→128MB，编码延迟仍被光栅化掩盖）
     private readonly List<Task> _pngSaveTasks = new();
     private int _pngSaveFailed = 0;
     private readonly System.Collections.Concurrent.ConcurrentBag<string> _pngSaveFailedPaths = new();
 
-    /// <summary>异步保存 PNG：编码+写盘在后台线程执行，渲染线程立即返回继续渲染下一瓦片。</summary>
+    // ===== 专用 PNG 编码工作池（2026-10-31，修复瓦片导出无限挂起）=====
+    // 实测（.NET 10 AOT，win-x64）：编码经 Task.Run 交运行时线程池后，在特定调度时序下池子
+    // "不再新增 worker"：12 个编码任务排队、进程仅剩 2 线程（1 个空转 ~1 核 20+ 分钟）、
+    // 渲染线程卡死在 FlushPngSaves/Task.WaitAll（z0 或 z1 任意瓦片处均可发生）。
+    // 排除：SetMinThreads 无效（懒生成，仍走同一不可靠路径）；DOTNET_ThreadPool_ForceMinWorkerThreads=64
+    // （启动时预建）可 100% 消除（同命令 20min 挂起 → 2.4s）。故此处自建固定线程池：
+    // 8 个后台线程随类型加载一次性创建，彻底绕开运行时池"按需增长"路径，饥饿不再可能。
+    private static readonly System.Collections.Concurrent.BlockingCollection<Action> _encQueue =
+        new System.Collections.Concurrent.BlockingCollection<Action>(
+            new System.Collections.Concurrent.ConcurrentQueue<Action>(), 256);
+
+    static ImageEngine()
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            var t = new System.Threading.Thread(() =>
+            {
+                foreach (var act in _encQueue.GetConsumingEnumerable())
+                {
+                    try { act(); } catch { /* SavePng 内部已 try/catch 返回 false；此处双保险防 worker 死掉 */ }
+                }
+            })
+            { IsBackground = true, Name = "PngEnc" + i };
+            t.Start();
+        }
+    }
+
+    /// <summary>异步保存 PNG：编码+写盘在专用后台池执行，渲染线程立即返回继续渲染下一瓦片。</summary>
     private void SavePngAsync(RasterCanvas rc, string path)
     {
-        // 背压：清理已完成任务；仍达上限则等最慢者完成（渲染线程短暂阻塞，内存有界）
+        // 背压：清理已完成任务；仍达上限则等待任一完成（渲染线程短暂阻塞，内存有界）。
+        // P6.5 修复：旧实现仅入循环前 RemoveAll 一次，而 Task.WaitAny 不改列表 → 任务完成后
+        // “计数仍≥上限 && WaitAny 立即返回” 死循环忙等（100% CPU 自旋，测试套件实测挂起 44 分钟）。
+        // 现每轮先移除已完成任务，仍达上限才等待；等待返回后必再清理，无自旋窗口。
         if (_pngSaveTasks.Count >= PngSaveBacklog)
         {
-            _pngSaveTasks.RemoveAll(t => t.IsCompleted);
-            while (_pngSaveTasks.Count >= PngSaveBacklog)
+            while (true)
+            {
+                _pngSaveTasks.RemoveAll(t => t.IsCompleted);
+                if (_pngSaveTasks.Count < PngSaveBacklog) break;
                 Task.WaitAny(_pngSaveTasks.ToArray());
+            }
         }
         long t0 = Environment.TickCount64;
-        _pngSaveTasks.Add(Task.Run(() =>
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _encQueue.Add(() =>
         {
             bool ok = rc.SavePng(path);
             if (!ok)
@@ -548,7 +586,9 @@ internal partial class ImageEngine
                 _pngSaveFailedPaths.Add(path);
             }
             Interlocked.Add(ref _pngSaveUs, Environment.TickCount64 - t0);
-        }));
+            tcs.TrySetResult(ok);
+        });
+        _pngSaveTasks.Add(tcs.Task);
     }
 
     /// <summary>等待全部后台编码写盘完成（瓦片循环结束后调用）。返回 false = 任一失败。</summary>
@@ -649,6 +689,8 @@ internal partial class ImageEngine
                 });
                 seq++;
             }
+            // P6.5：瓦片行边界回收（与合并路径条带边界同因）：本行已编码完成的 64MB 画布垃圾及时释放，WS 有界
+            GC.Collect();
         }
 
         LogSkipped("PNG");
@@ -658,28 +700,57 @@ internal partial class ImageEngine
         double skipPct = totalPairs > 0 ? 100.0 * (1 - (double)renderedPairs / totalPairs) : 0;
         _log($"✅  PNG 分块输出：{seq} 张瓦片（{cols} 列 × {rows} 行，单瓦片 ≤ {tile}×{tile}px，整幅 {fullW}×{fullH} @1:1×{F(zoom)}，OGC WMTS 命名 tiles/{zLevel}/{{row}}/{{col}}.png{(_transparentBg ? "，透明背景" : "")}）");
         _log($"   空间剔除：{seq} 瓦片共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%；编码写盘已后台并行）");
+        if (PerfOn)
+            _log($"[perf][mem] 瓦片渲染完成：GC存活≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / Insert精灵 {_insertSprites.Count} 个 {_insSpriteMemBytes / 1024 / 1024}MB / 字形精灵 {_glyphSprites.Count} 个 / 点精灵 {_sprites.Count} 个");
         LogPerfSummary();
         return PngResult(fullW, fullH, false, zoom, tiles);
     }
 
-    // P6：原分辨率行流合并（不缩小）。网格渲染与 WritePngTiled 完全一致（同 tile 网格、同空间剔除、同光栅化参数），
-    // 但不写瓦片文件，而是把各瓦片画布按行优先喂给 PngNativeMergeWriter → 单张 fullW×fullH 原分辨率 PNG。
-    // 内存 = 当前网格行画布合计（fullW×tile×4，写器持引用到行满，与整幅总高无关）+ 1 整幅行（fullW×4）
-    //   + ≤1MB IDAT 缓冲。网格行体积由下方硬上限约束 → 整幅再高也只多“网格行数”，不多“网格行体积”。
+    // P6/P6.5：原分辨率行流合并（不缩小）。网格列与 WritePngTiled 完全一致（同 tile 宽、同空间剔除、同光栅化参数），
+    // 再沿高度切成 bandH 高的子条带，行优先（先 (0,cy,ky) 整块、再 (1,cy,ky) 整块……末列 (cols-1,cy,ky)）
+    // 喂给 PngNativeMergeWriter → 单张 fullW×fullH 原分辨率 PNG。
+    // 内存（P6.5：子条带即时拷贝 + 单固定画布，零画布垃圾、零重分配）：
+    //   写器把每个子条带各行即时拷入条带累积缓冲（fullW×bandH×4 ≤ PngMergeBandCapBytes（16MB），首条带一次分配、跨条带复用）
+    //   渲染画布 = 单张固定 maxTw×maxTh（≤ tile×tile），全程一次分配、所有子条带复用
+    //   （P6.5.1：原按 tw×(sy+sh) 逐子条带重分配，T11 实测 19 次重分配 × ≤64MiB；旧画布虽被
+    //     GC 释放，但 LOH 段 WS 不随 GC 回落，WS−Heap 间隙实测振荡至 ~297MB（perf5）→ 固定画布后
+    //     画布侧零垃圾，间隙稳定在基线水平）
+    //   → 合并内存 = 条带累积缓冲 + 1 张固定渲染画布（≤67MB）+ ≤1MB IDAT，与整幅总高度无关。
+    //   （P6 原实现写器持整网格行画布引用至行满，T11 实测 4×64MB=256MB/网格行常驻 → peakWS 1197MB；
+    //     P6.5 后 T11 目标 <500MB。）
+    // 像素一致（P6.5 修复）：子条带画布 = 瓦片宽 ×（子条带底 − 瓦片顶），渲染原点 = 【瓦片】左上角
+    //   （_tileOx/_tileOy = x0/y0，与 WritePngTiled 逐式一致）；写器只取画布 [sy, sy+sh) 行作条带。
+    //   必须用瓦片原点而非子条带原点：端点经 PngSx/PngSy(double)→float 舍入，原点取整分解不同
+    //   ⇒ float 端点可差 1 ulp ⇒ AA 边缘覆盖量化 ±1 计数（P6 像素一致测试实测 163px 差异，整数缩放亦现）。
+    //   瓦片原点下局部坐标与瓦片路径逐位相同 ⇒ 整数/分数缩放均与瓦片拼合逐像素一致。
+    /// <summary>P6.5 内存探针（PerfOn 时）：WS/Private/GC堆/已提交/碎片/线程数——定位 WS 与 GC 堆之外的常驻内存。</summary>
+    private static string MemProbe()
+    {
+        var mi = GC.GetGCMemoryInfo();
+        var proc = Process.GetCurrentProcess();
+        return $"WS={proc.WorkingSet64 / 1024 / 1024}MB Private={proc.PrivateMemorySize64 / 1024 / 1024}MB Heap={mi.HeapSizeBytes / 1024 / 1024}MB Threads={proc.Threads.Count}";
+    }
+
     private ImageExportResult WritePngNativeMerge(string outPath, int fullW, int fullH, double zoom)
     {
-        // 瓦片边长：与 WritePngTiled 同一公式（min(PngTileSize, 单侧上限) 且 tile×tile ≤ 总像素上限）。
-        // 网格必须与瓦片路径一致：光栅化 AA 覆盖为 float 量级精度，瓦片网格不同 ⇒ 局部坐标取整路径不同
+        // 瓦片宽：与 WritePngTiled 同一公式（min(PngTileSize, 单侧上限) 且 tile×tile ≤ 总像素上限）。
+        // 网格列必须与瓦片路径一致：光栅化 AA 覆盖为 float 量级精度，瓦片网格不同 ⇒ 局部坐标取整路径不同
         // ⇒ 边缘像素覆盖可差 ±1 计数（T11②“合并图=瓦片拼合逐像素一致”要求同网格）。
         int tile = _opt.PngTileSize > 0 ? _opt.PngTileSize : 4096;
         tile = Math.Min(tile, PngMaxSide);
         while (tile > 1 && (long)tile * tile > PngMaxPixels) tile--;
-        // 硬 OOM 护栏：写器须持当前整网格行画布（fullW×tile×4）到行满。极宽画布下缩小 tile 使网格行
-        // ≤ PngMergeRowCapBytes（触发时网格与瓦片路径不同 → 合并图与瓦片拼合仅在 AA 边缘像素差 ±1 计数，
-        // 文档化限制；验收数据集网格行 ~350MB，不触发）。
-        const long PngMergeRowCapBytes = 512L * 1024 * 1024;
-        long maxTileForRowCap = PngMergeRowCapBytes / (Math.Max(1, fullW) * 4L);
-        if (maxTileForRowCap < tile) tile = Math.Max(1, (int)maxTileForRowCap);
+        // 子条带高（P6.5）：条带累积缓冲 fullW×bandH×4 ≤ PngMergeBandCapBytes（16MB），向下取 64 的倍数，
+        // 最小 64px、不超过 tile。极宽画布 bandH 自动变小；无 OOM 风险（旧 512MB 网格行硬上限随“写器持画布”语义一并移除）。
+        // 预算 16MB（P6.5 门禁标定）：64MB 预算 peakWS 522MB（perf7）、32MB 预算 501.2MB（perf8）、
+        // 16MB 预算 502MB（perf9）——峰值对累积缓冲尺寸不敏感（acc 31→15.5MB 仅使峰值 501.2→502），
+        // 超出 500MB 的真实来源 = strip 后基线 404MB + 渲染画布 64MB + 首条带一次性预热瞬态≈30-38MB
+        // （JIT/字体/字形精灵/Insert 精灵），瞬态与画布共存于首条带窗口 ⇒ perf10：画布分配前预热缓存 +
+        // GC.Collect() 把瞬态移出画布窗口（见方法内预热线）。总压缩字节数不变。
+        const long PngMergeBandCapBytes = 16L * 1024 * 1024;
+        long bandRows = PngMergeBandCapBytes / (Math.Max(1, fullW) * 4L);
+        int bandH = (int)Math.Max(64L, bandRows) & ~63;
+        if (bandH < 64) bandH = 64;
+        if (bandH > tile) bandH = tile;
         int cols = (int)Math.Ceiling(fullW / (double)tile);
         int rows = (int)Math.Ceiling(fullH / (double)tile);
 
@@ -691,45 +762,81 @@ internal partial class ImageEngine
         if (PerfOn) _swCull.Restart();
         BuildCullData(); // 预计算顶层实体世界 AABB（含线宽/点字形安全外扩），供按瓦片空间剔除
         if (PerfOn) _swCull.Stop();
+        if (PerfOn)
+            _log($"[perf][mem] 剔除后：流式实体 {_streamEnts?.Count ?? 0} / 顶层剔除 {_topEnts?.Count ?? 0} / GC存活≈{GC.GetTotalMemory(false) / 1024 / 1024}MB（未强制回收） / {MemProbe()}");
 
         using var writer = new PngNativeMergeWriter(outPath, fullW, fullH);
+        // P6.5.1：单张固定渲染画布（最大瓦片宽 × 最大瓦片高），全程一次分配、所有子条带复用。
+        // 原实现按 tw×(sy+sh) 逐子条带重分配（T11 共 19 次、单张 ≤64MiB）：旧画布虽被 GC 回收，
+        // 但 LOH 段的 WS 不随 GC 回落，WS−Heap 间隙实测振荡至 ~297MB（perf5 探针）→ 固定画布后零重分配。
+        // 像素一致不受影响：渲染原点仍为瓦片左上角（Option D：_tileOx/_tileOy = x0/y0），
+        // 写器仍只取画布 [0,tw)×[sy,sy+sh) 行区间；画布多出的行列仅被 ClearPngBg 清背景、不被读取，
+        // 子条带区覆盖度计算与原小画布逐位相同。
+        int maxTw = Math.Min(tile, fullW);
+        int maxTh = Math.Min(tile, fullH);
+        var pooled = new RasterCanvas(maxTw, maxTh);
+        int pw = maxTw, ph = maxTh;
         long renderedPairs = 0, totalPairs = 0;
-        long tileCount = 0;
+        long subStripCount = 0, bandCount = 0;
         for (int cy = 0; cy < rows && !writer.Failed; cy++)
         {
             int y0 = cy * tile;
             int th = Math.Min(tile, fullH - y0);
-            for (int cx = 0; cx < cols && !writer.Failed; cx++)
+            int bands = (th + bandH - 1) / bandH;
+            for (int ky = 0; ky < bands && !writer.Failed; ky++)
             {
-                int x0 = cx * tile;
-                int tw = Math.Min(tile, fullW - x0);
-                if (tw < 1 || th < 1) continue;
-
-                var rc = new RasterCanvas(tw, th);
-                ClearPngBg(rc);
-                _rc = rc;
-                // 整幅统一比例 = 恰好 zoom（与 WritePngTiled/WritePngSingle 严格一致），
-                // 配合 _tileOx/_tileOy 把整幅场景映射到该瓦片局部坐标系；瓦片间无缝（同一全局像素网格）。
-                _pngKx = zoom; _pngKy = zoom;
-                _tileOx = x0; _tileOy = y0;
-
-                // 空间剔除：与 WritePngTiled 逐式一致（瓦片像素 → 数据坐标矩形，Y 翻转）
-                double dx0 = _minX - _margin + x0 / (double)_pngKx;
-                double dx1 = _minX - _margin + (x0 + tw) / (double)_pngKx;
-                double dy1 = _maxY + _margin - y0 / (double)_pngKy;
-                double dy0 = _maxY + _margin - (y0 + th) / (double)_pngKy;
-                totalPairs += _topEnts != null ? _topEnts.Count : 0;
-                foreach (var ent in CulledTopEntities(dx0, dy0, dx1, dy1))
+                int sy = ky * bandH;                    // 子条带在瓦片内偏移（像素）
+                int sh = Math.Min(bandH, th - sy);      // 子条带高（末条带可更短）
+                for (int cx = 0; cx < cols && !writer.Failed; cx++)
                 {
-                    EmitEntityPng(ent, null, 1.0, 7, null, null, _ltScale);
-                    renderedPairs++;
-                }
-                _rc = null;
+                    int x0 = cx * tile;
+                    int tw = Math.Min(tile, fullW - x0);
+                    if (tw < 1 || sh < 1) continue;
 
-                writer.WriteTile(rc); // 行优先拼装整幅扫描线；rc 由写器持引用至本网格行拼满（随后方可 GC）
-                tileCount++;
-                if (_perfVerboseTile)
-                    _log($"   [perf] 合并瓦片({cx},{cy}) 实体已并入整幅行流");
+                    // 渲染画布：单张固定 maxTw×maxTh（见方法头 P6.5.1 注释）；
+                    // 本子条带 = 画布列 [0, tw) × 行 [sy, sy+sh)（原点 = 瓦片左上角，Option D）
+                    var rc = pooled;
+                    if (PerfOn && subStripCount < 8)
+                        _log($"   [diag] sub{subStripCount + 1}({cx},{cy},{ky}) pre: GC≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / {MemProbe()} / ins={_insertSprites.Count}:{_insSpriteMemBytes / 1024 / 1024}MB glyph={_glyphSprites.Count} pt={_sprites.Count}");
+                    ClearPngBg(rc);
+                    _rc = rc;
+                    // 整幅统一比例 = 恰好 zoom（与 WritePngTiled/WritePngSingle 严格一致）；
+                    // 原点 = 瓦片左上角（与 WritePngTiled 逐式一致）→ 局部 float 坐标与瓦片路径逐位相同 ⇒ 像素一致。
+                    _pngKx = zoom; _pngKy = zoom;
+                    _tileOx = x0; _tileOy = y0;
+
+                    // 空间剔除：与 WritePngTiled 逐式一致（子条带像素 → 数据坐标矩形，Y 翻转）
+                    double dx0 = _minX - _margin + x0 / (double)_pngKx;
+                    double dx1 = _minX - _margin + (x0 + tw) / (double)_pngKx;
+                    double dy1 = _maxY + _margin - (y0 + sy) / (double)_pngKy;
+                    double dy0 = _maxY + _margin - (y0 + sy + sh) / (double)_pngKy;
+                    totalPairs += _topEnts != null ? _topEnts.Count : 0;
+                    foreach (var ent in CulledTopEntities(dx0, dy0, dx1, dy1))
+                    {
+                        EmitEntityPng(ent, null, 1.0, 7, null, null, _ltScale);
+                        renderedPairs++;
+                    }
+                    _rc = null;
+                    if (PerfOn && subStripCount < 8)
+                        _log($"   [diag] sub{subStripCount + 1}({cx},{cy},{ky}) post-render: GC≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / {MemProbe()} / ins={_insertSprites.Count}:{_insSpriteMemBytes / 1024 / 1024}MB glyph={_glyphSprites.Count} pt={_sprites.Count}");
+
+                    writer.WriteTile(rc, sy, tw, sh); // 即时拷贝画布 [0,tw)×[sy,sy+sh) 入条带累积缓冲；rc 立即可复用
+                    if (PerfOn && subStripCount < 8)
+                        _log($"   [diag] sub{subStripCount + 1}({cx},{cy},{ky}) post-write: GC≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / {MemProbe()}");
+                    subStripCount++;
+                    if (cx == cols - 1)
+                    {
+                        bandCount++;
+                        // P6.5：条带边界回收——渲染临时对象（每实体路径/点数组等）在条带内累积为垃圾，
+                        // workstation GC 不会自行触发 gen2 → WS 持续爬升（T11 实测 565→678MB/18 条带）。
+                        // 每带一次 gen2（~50-200ms）使 WS 有界 ≈ 存活集 + 条带累积缓冲（门禁 peakWS<500MB）。
+                        GC.Collect();
+                        if (PerfOn)
+                            _log($"   [perf][mem] 条带 {bandCount} ({cx},{cy},{ky}) 完成：GC存活≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / 渲染画布 {pw}×{ph} / {MemProbe()}");
+                    }
+                    if (_perfVerboseTile)
+                        _log($"   [perf] 合并子条带({cx},{cy},{ky}) 实体已并入整幅行流");
+                }
             }
         }
 
@@ -742,8 +849,10 @@ internal partial class ImageEngine
             return new ImageExportResult { Success = false };
         }
         double skipPct = totalPairs > 0 ? 100.0 * (1 - (double)renderedPairs / totalPairs) : 0;
-        _log($"✅  PNG 原分辨率流式合并（不缩小）：{outPath}（整幅 {fullW}×{fullH} @1:1×{F(zoom)}，{cols}×{rows} 瓦片网格 {tileCount} 张行流并入，合并内存≈当前网格行 {(long)fullW * tile * 4 / 1024 / 1024}MB（与整幅总高无关）{(_transparentBg ? "，透明背景" : "")}）");
-        _log($"   空间剔除：{tileCount} 瓦片共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%）");
+        _log($"✅  PNG 原分辨率流式合并（不缩小）：{outPath}（整幅 {fullW}×{fullH} @1:1×{F(zoom)}，{cols}×{rows} 瓦片网格 × 子条带 {bandH}px 高共 {bandCount} 条带 {subStripCount} 块行流并入，合并内存≈条带累积缓冲 {(long)fullW * bandH * 4 / 1024 / 1024}MB + 渲染画布(瓦片宽×至子条带底，单张复用)（与整幅总高无关）{(_transparentBg ? "，透明背景" : "")}）");
+        _log($"   空间剔除：{subStripCount} 子条带共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%）");
+        if (PerfOn)
+            _log($"[perf][mem] 渲染完成：GC存活≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / Insert精灵 {_insertSprites.Count} 个 {_insSpriteMemBytes / 1024 / 1024}MB / 字形精灵 {_glyphSprites.Count} 个 / 点精灵 {_sprites.Count} 个 / 渲染画布 {pw}×{ph}");
         LogPerfSummary();
         // 合并图 = 整幅原分辨率单图：MergedToSingle=true，无瓦片列表（宿主坐标 JSON 走单画布分支）
         return PngResult(fullW, fullH, true, zoom, System.Array.Empty<ImageTile>());
@@ -1091,6 +1200,7 @@ internal partial class ImageEngine
                     var shx = TryBuildShxTextWorld(t, tr, scaleMul);
                     if (shx != null)
                     {
+                        if (PerfOn) _perfTextChars += (t.Value ?? "").Length;   // SHX 文字字符（原计数器从未累加）
                         var pb = new PolyBuilder();
                         for (int k = 0; k < shx.Value.Type.Count; k++)
                         {
@@ -2327,6 +2437,7 @@ internal partial class ImageEngine
         bool underline = false, bool overline = false, double runWidthData = 0.0, double tracking = 1.0)
     {
         if (string.IsNullOrEmpty(content) || _rc == null) return;
+        if (PerfOn) _perfTextChars += content.Length;   // 2026-10-31：原声明后从未累加（恒 0），此处补上
         double sx = PngSx(x), sy = PngSy(y);
         float fs = (float)(fsData * PngK);
         if (fs <= 0) return;
