@@ -2341,6 +2341,7 @@ internal partial class ImageEngine
         if (_streaming)
         {
             _minX = _stMinX; _minY = _stMinY; _maxX = _stMaxX; _maxY = _stMaxY;
+            if (_stAny) ClampOutlierExtents(_streamEnts);
             return _stAny;
         }
         _extAny = false;
@@ -2351,7 +2352,77 @@ internal partial class ImageEngine
 
         foreach (var ent in AllEntities())
             ExpandEntityExtents(ent, false);
+        if (_extAny) ClampOutlierExtents(null);
         return _extAny;
+    }
+
+    // ===== 离群范围守护（2026-11-02 用户要求：只渲染有数据的部分，离群几何不得撑爆画布）=====
+    // 背景：源数据含远离主体的离群几何（如 DGN→DWG 转换把 250m 方里网单元块内容镜像了一份到
+    //   X≈-40,530,000 处，距主体 81,000 km）时，几何并集把画布撑到 8 万 km → zoom12 下瓦片
+    //   237,509×10 ≈ 240 万张（99.99% 空白，实测跑了 55 分钟仍在写第 1 行）。
+    // 做法：并集范围「绝对巨大且相对主体显著偏大」时，把画布范围收缩到
+    //   主体 = 顶层实体中心点 0.5%~99.5% 分位盒（≥50 个有限实体时启用分位；<50 仅告警不收缩），
+    //   各轴外扩 5%（下限 250 m）作为新范围。主体外的实体仍参与渲染，越界部分由画布裁剪
+    //   （RasterCanvas.Blend 自动裁剪，与空间剔除同口径，像素级安全）。
+    // 触发（AND，防误伤大区域图）：某轴 并集 > ExtentOutlierCapMeters（默认 300km）
+    //   且 并集 > ExtentOutlierFactor（默认 50）× 主体。
+    // entities：流式模式传 _streamEnts；完整模式传 null（内部取 AllEntities()，走 _sortOrderCache 缓存）。
+    private void ClampOutlierExtents(System.Collections.Generic.List<ACadSharp.Entities.Entity>? entities)
+    {
+        var opt = _opt;
+        if (opt == null || !opt.ExtentOutlierGuard) return;
+
+        double uW = _maxX - _minX, uH = _maxY - _minY;
+        if (!double.IsFinite(uW) || !double.IsFinite(uH) || uW <= 0 || uH <= 0) return;
+
+        double factor = opt.ExtentOutlierFactor > 0 ? opt.ExtentOutlierFactor : 50.0;
+        double capM = opt.ExtentOutlierCapMeters > 0 ? opt.ExtentOutlierCapMeters : 300_000.0;
+
+        // 逐实体有限世界 AABB + 中心点（与 ComputeExtents 同展开；XLine/Ray/未知类型返回覆盖全图盒
+        // → finiteOnly=true 时跳过：它们无局部几何，不参与分位、不扩展收缩后范围；渲染时画布裁剪自然处理）
+        var list = entities ?? AllEntities().ToList();
+        var cx = new double[list.Count];
+        var cy = new double[list.Count];
+        int n = 0;
+        foreach (var e in list)
+        {
+            if (e == null) continue;
+            if (!EntityWorldAabb(e, out double a, out double b, out double c, out double d, finiteOnly: true)) continue;
+            if (!double.IsFinite(a) || !double.IsFinite(b) || !double.IsFinite(c) || !double.IsFinite(d)) continue;
+            if (a > c) { double t = a; a = c; c = t; }
+            if (b > d) { double t = b; b = d; d = t; }
+            cx[n] = (a + c) / 2; cy[n] = (b + d) / 2;
+            n++;
+        }
+
+        // 主体 = 中心点 0.5%~99.5% 分位盒。分位对「少量离群中心」稳健（本例顶层污染仅 12 个巨型块引用+
+        // 少量无限线 ≈ 0.2% < 0.5%）；<50 个有效实体时分位无代表性 → 只告警不收缩（防小文档误伤）。
+        if (n < 50)
+        {
+            if (uW > capM || uH > capM)
+                _log($"⚠️  范围守护：几何并集 {uW:0.###}×{uH:0.###} m 超绝对上限 {capM:0.##} m，但有限实体仅 {n} 个（<50，无主体分位可收缩）→ 保持原范围");
+            return;
+        }
+        var sx = new double[n]; var sy = new double[n];
+        Array.Copy(cx, sx, n); Array.Copy(cy, sy, n);
+        Array.Sort(sx); Array.Sort(sy);
+        int kLo = (int)(0.005 * (n - 1)), kHi = (int)(0.995 * (n - 1));
+        if (kHi < kLo) kHi = kLo;
+        double p0x = sx[kLo], p1x = sx[kHi], p0y = sy[kLo], p1y = sy[kHi];
+        double coreW = Math.Max(p1x - p0x, 0), coreH = Math.Max(p1y - p0y, 0);
+
+        bool bigW = uW > capM && uW > factor * Math.Max(coreW, 1.0);
+        bool bigH = uH > capM && uH > factor * Math.Max(coreH, 1.0);
+        if (!bigW && !bigH) return;
+
+        // 收缩：主体各轴外扩 5%（下限 250 m）
+        double mx = Math.Max(coreW * 0.05, 250.0), my = Math.Max(coreH * 0.05, 250.0);
+        double kx0 = p0x - mx, kx1 = p1x + mx, ky0 = p0y - my, ky1 = p1y + my;
+        if (kx1 <= kx0 || ky1 <= ky0) return;
+
+        _minX = kx0; _minY = ky0; _maxX = kx1; _maxY = ky1;
+        _log($"⚠️  范围守护：几何并集 {uW:0.###}×{uH:0.###} m 异常巨大（主体 ≈ {coreW:0.##}×{coreH:0.##} m，{n} 个有限实体）→ 画布收缩为 {kx1 - kx0:0.##}×{ky1 - ky0:0.##} m");
+        _log($"   范围守护：主体外实体仍参与渲染，越界部分按画布裁剪（只渲染有数据的部分）；如属合法超大范围请设 ExtentOutlierGuard=false");
     }
 
     // 单实体范围扩展（完整模式 ComputeExtents 与流式 Render 共用，P5 自 ComputeExtents 抽出）：

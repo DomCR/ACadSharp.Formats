@@ -83,6 +83,41 @@ public class ImageConfiguration
 	public bool PngPointSpriteCache { get; set; } = false;
 
 	/// <summary>
+	/// 离群范围守护（画布范围稳健化，PNG/SVG/PDF 共用，2026-11-02）。
+	/// 背景：源数据含远离主体的离群几何（如 DGN 转换引入的镜像脏点，距主体 8 万公里）时，
+	/// 几何并集范围把画布撑到 8 万 km → 瓦片数从 15×10 爆炸到 237,509×10（约 240 万张，其中 99.99% 空白）。
+	/// true（默认）= 当并集范围「绝对巨大且相对主体显著偏大」时，画布范围收缩到分位数主体范围+边距：
+	///   主体 = 实体中心点 0.1%~99.9% 分位盒（≥50 个有效实体时启用分位，否则仅按绝对上限判断）；
+	///   触发 = 某轴 并集 &gt; <see cref="ExtentOutlierCapMeters"/> 且 并集 &gt; <see cref="ExtentOutlierFactor"/>×主体；
+	///   收缩 = 主体各轴外扩 5%（下限 250 m）作为新范围。主体外的实体仍参与渲染，
+	///   其越界部分由画布裁剪（像素级安全，与空间剔除同口径）。
+	/// false = 完全按几何并集定范围（旧行为；确有超大范围成图需求时关闭）。
+	/// </summary>
+	public bool ExtentOutlierGuard { get; set; } = true;
+
+	/// <summary>
+	/// 离群范围守护的「相对主体放大倍数」阈值（仅 <see cref="ExtentOutlierGuard"/>=true 时生效）。
+	/// 某轴并集 &gt; 该倍数×主体宽度 才视为离群（默认 50；与绝对上限为 AND 关系）。
+	/// </summary>
+	public double ExtentOutlierFactor { get; set; } = 50.0;
+
+	/// <summary>
+	/// 离群范围守护的「绝对上限」（米，仅 <see cref="ExtentOutlierGuard"/>=true 时生效）。
+	/// 某轴并集 &gt; 该值 且 &gt; 倍数×主体 才视为离群（默认 300000 = 300 km，
+	/// 覆盖单幅大比例尺地形图/厂区图/管线图的常见量级；超大区域图可上调或关闭守护）。
+	/// </summary>
+	public double ExtentOutlierCapMeters { get; set; } = 300_000.0;
+
+	/// <summary>
+	/// PNG 分块时跳过「无数据」瓦片（仅 PNG 分块端 WritePngTiled 生效，2026-11-02）。
+	/// true（默认）= 瓦片数据区域内无任何相交实体（空间剔除判定 0 像素贡献）时不写文件、
+	///   也不进入结果瓦片列表（坐标 JSON 相应不列出该瓦片）——空白瓦片不占磁盘、不占时间。
+	///   透明背景下缺瓦片 = 透明；白底背景下缺瓦片由下游按白底处理。
+	/// false = 旧行为：网格内每个瓦片都写文件（含全空白瓦片）。
+	/// </summary>
+	public bool SkipEmptyTiles { get; set; } = true;
+
+	/// <summary>
 	/// 日志回调（进度/告警）。
 	/// </summary>
 	public Action<string> Log { get; set; }

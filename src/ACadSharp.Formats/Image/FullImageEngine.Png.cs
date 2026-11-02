@@ -213,7 +213,8 @@ internal partial class ImageEngine
 
     // 取实体的世界空间 AABB（与 ComputeExtents 的逐类型展开一致；Insert 用 ExpandInsert 世界点）。
     // 未知类型/无限线(XLine/Ray)返回覆盖全图盒（保证不被剔除）。
-    private bool EntityWorldAabb(Entity ent, out double mnx, out double mny, out double mxx, out double mxy)
+    // finiteOnly=true（离群范围守护专用）：未知类型/无限线无局部几何 → 返回 false（不参与分位、不扩展范围）。
+    private bool EntityWorldAabb(Entity ent, out double mnx, out double mny, out double mxx, out double mxy, bool finiteOnly = false)
     {
         var b = new AabbBox();
         switch (ent)
@@ -253,9 +254,15 @@ internal partial class ImageEngine
                 }
             case Insert ins: ExpandInsert(ins, b.Ex); break;
             case Leader ld: ExpandLeaderExtents(ld, _doc, b.Ex); break; // 与 ComputeExtents 同展开（含样条过冲+箭头 bbox）
-            case XLine _: b.mnx=_minX; b.mny=_minY; b.mxx=_maxX; b.mxy=_maxY; b.any=true; break; // 无限线：不剔除
-            case Ray _: b.mnx=_minX; b.mny=_minY; b.mxx=_maxX; b.mxy=_maxY; b.any=true; break;
-            default: b.mnx=_minX; b.mny=_minY; b.mxx=_maxX; b.mxy=_maxY; b.any=true; break; // 未知：不剔除（安全）
+            case XLine _:
+                if (finiteOnly) { mnx = mny = double.MaxValue; mxx = mxy = double.MinValue; return false; } // 无限线无局部几何：范围守护跳过（渲染时画布裁剪自然处理）
+                b.mnx=_minX; b.mny=_minY; b.mxx=_maxX; b.mxy=_maxY; b.any=true; break; // 无限线：不剔除
+            case Ray _:
+                if (finiteOnly) { mnx = mny = double.MaxValue; mxx = mxy = double.MinValue; return false; }
+                b.mnx=_minX; b.mny=_minY; b.mxx=_maxX; b.mxy=_maxY; b.any=true; break;
+            default:
+                if (finiteOnly) { mnx = mny = double.MaxValue; mxx = mxy = double.MinValue; return false; } // 未知：不剔除（安全）；范围守护跳过
+                b.mnx=_minX; b.mny=_minY; b.mxx=_maxX; b.mxy=_maxY; b.any=true; break;
         }
         mnx=b.mnx; mny=b.mny; mxx=b.mxx; mxy=b.mxy;
         return b.any;
@@ -627,6 +634,7 @@ internal partial class ImageEngine
 
         var tiles = new List<ImageTile>();
         int seq = 0;
+        int emptySkipped = 0; // 无数据瓦片跳过计数（SkipEmptyTiles，2026-11-02 用户要求）
         long renderedPairs = 0, totalPairs = 0;
         for (int cy = 0; cy < rows; cy++)
         {
@@ -665,6 +673,17 @@ internal partial class ImageEngine
                 long _tileRenderMs = Environment.TickCount64 - _tileRenderT0;
                 _rc = null;
 
+                // 无数据瓦片跳过（2026-11-02 用户要求）：空间剔除判定本瓦片 0 个相交实体 ⇒ 0 像素贡献
+                // （像素级精确，与剔除安全外扩同口径）→ 不写文件、不进瓦片列表（坐标 JSON 不列出该瓦片）。
+                // 空白瓦片不占磁盘、不占编码/写盘时间；透明背景缺瓦片=透明，白底背景由下游按白底处理。
+                if (_tileEnts == 0 && _opt.SkipEmptyTiles)
+                {
+                    emptySkipped++;
+                    if (_perfVerboseTile)
+                        _log($"   [perf] tile({cx},{cy}) 无数据，跳过（不输出）");
+                    continue;
+                }
+
                 // OGC WMTS 标准命名：tiles/{z}/{row}/{col}.png。
                 //   z = 缩放级别：单级导出取 OutputZoom 四舍五入；多级导出取宿主传入的 0-based 级别索引（zLevel）。
                 //   row=cy 自顶向下，col=cx 自左向右；叶子文件名即 col（同一 (z,row) 目录下 col 唯一，无碰撞），与 ImageTile.RelPath 一致。
@@ -698,7 +717,7 @@ internal partial class ImageEngine
         if (!FlushPngSaves())
             return new ImageExportResult { Success = false };
         double skipPct = totalPairs > 0 ? 100.0 * (1 - (double)renderedPairs / totalPairs) : 0;
-        _log($"✅  PNG 分块输出：{seq} 张瓦片（{cols} 列 × {rows} 行，单瓦片 ≤ {tile}×{tile}px，整幅 {fullW}×{fullH} @1:1×{F(zoom)}，OGC WMTS 命名 tiles/{zLevel}/{{row}}/{{col}}.png{(_transparentBg ? "，透明背景" : "")}）");
+        _log($"✅  PNG 分块输出：{seq} 张瓦片（{cols} 列 × {rows} 行网格，单瓦片 ≤ {tile}×{tile}px，整幅 {fullW}×{fullH} @1:1×{F(zoom)}，OGC WMTS 命名 tiles/{zLevel}/{{row}}/{{col}}.png{(_transparentBg ? "，透明背景" : "")}{(emptySkipped > 0 ? $"，跳过 {emptySkipped} 张无数据空白瓦片（未输出）" : "")}）");
         _log($"   空间剔除：{seq} 瓦片共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%；编码写盘已后台并行）");
         if (PerfOn)
             _log($"[perf][mem] 瓦片渲染完成：GC存活≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / Insert精灵 {_insertSprites.Count} 个 {_insSpriteMemBytes / 1024 / 1024}MB / 字形精灵 {_glyphSprites.Count} 个 / 点精灵 {_sprites.Count} 个");
