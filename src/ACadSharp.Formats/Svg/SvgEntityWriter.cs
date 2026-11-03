@@ -20,6 +20,9 @@ internal class SvgEntityWriter
 
 	private readonly CadXmlWriter _writer;
 
+	// INSERT 展开的祖先块集合（环防护）：自引用/循环块截断该层展开，防无限递归爆栈。
+	private readonly HashSet<BlockRecord> _insertAncestors = new();
+
 	public SvgEntityWriter(CadXmlWriter writer)
 	{
 		this._writer = writer;
@@ -385,18 +388,36 @@ internal class SvgEntityWriter
 
 	private void writeInsert(Insert insert, Transform transform)
 	{
-		var insertTransform = insert.GetTransform();
-		var merged = new Transform(transform.Matrix * insertTransform.Matrix);
-
-		_writer.WriteStartElement("g");
-		this.writeTransform(merged);
-
-		foreach (var e in insert.Block.Entities)
+		if (insert?.Block == null)
 		{
-			this.WriteEntity(e);
+			return;
 		}
 
-		_writer.WriteEndElement();
+		// 环防护：同一块在祖先链上重复出现（INSERT 自引用/循环嵌套）→ 截断该层展开。
+		if (!this._insertAncestors.Add(insert.Block))
+		{
+			return;
+		}
+
+		try
+		{
+			var insertTransform = insert.GetTransform();
+			var merged = new Transform(transform.Matrix * insertTransform.Matrix);
+
+			_writer.WriteStartElement("g");
+			this.writeTransform(merged);
+
+			foreach (var e in insert.Block.Entities)
+			{
+				this.WriteEntity(e);
+			}
+
+			_writer.WriteEndElement();
+		}
+		finally
+		{
+			this._insertAncestors.Remove(insert.Block);
+		}
 	}
 
 	private void writeLine(Line line, Transform transform)

@@ -1,52 +1,48 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- [GDB2CAD PATCH] 本地克隆改造（T4：图+PDF 完全由 ACadSharp.Formats 实现）：
+	     1) 目标框架收敛为 net10.0（与 GDB2CAD/ACadSharp fork 一致；原多目标 net8/net9/net48/netstandard2.1
+        需要本仓库不存在的 ACadSharp.Formats.snk 签名密钥，单目标后签名要求见下方 SignAssembly 属性——fork 核心强签名 + IVT 带公钥，必须同 snk 签名，2026-11 P5 固化）。
+	     2) ACadSharp 依赖改为本地 fork 源码工程引用（原 Release 走 NuGet ACadSharp 3.8.*，
+        与 fork 3.7.16 双程序集冲突，且 fork 含 100+ 补丁与 InternalsVisibleTo）。
+	     3) SHX 形状/字体解析已从外部 Fonts.Lib 迁至核心 ACadSharp.Text（ACadSharp.csproj 内），
+	        零外部依赖；复杂线型 SHX Shape 段仍走 ShxFont.Load + TryGetShapeNumber/TryGetGlyph。
+	     上游库 MIT（DomCR/ACadSharp.Formats）；GDB2CAD 专属导出器原在 Gdb\ 目录，R15 迁入对应
+	     格式目录（Svg\FullSvgExporter、Pdf\FullPdfExporter、Image\FullImageEngine.*/ImageConfiguration/
+	     TaperOffsetBuilder、Pdf\PdfFontManager/CjkFont），Gdb\ 已删除。 -->
 
 	<PropertyGroup>
-		<TargetFrameworks>net8.0;net9.0;net10.0;net48;netstandard2.1</TargetFrameworks>
+		<TargetFramework>net10.0</TargetFramework>
 		<Authors>DomCr</Authors>
-		<PackageId>ACadSharp.Formats</PackageId>
-		<PackageTags>C# Dwg Dxf Json Svg Pdf</PackageTags>
-		<RepositoryUrl>https://github.com/DomCR/ACadSharp.Formats</RepositoryUrl>
-		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<RepositoryType>git</RepositoryType>
-		<PackageProjectUrl>https://github.com/DomCR/ACadSharp.Formats</PackageProjectUrl>
-		<Copyright>Copyright (c) 2026 Albert Domenech</Copyright>
 		<Description>Extension library for ACadSharp to export a dwg/dxf document into different media formats.</Description>
-		<GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release'">True</GeneratePackageOnBuild>
-	</PropertyGroup>
-
-	<PropertyGroup>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<Version>0.0.1</Version>
-		<PackageOutputPath>../nupkg</PackageOutputPath>
-		<SignAssembly>True</SignAssembly>
-		<AssemblyOriginatorKeyFile>../ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<NoWarn>$(NoWarn);CS1591</NoWarn>
+		<!-- [GDB2CAD PATCH] 强签名（2026-11 P5）：fork 核心 ACadSharp 为强签名程序集，
+		     其 InternalsVisibleTo("ACadSharp.Formats") 带公钥 → 必须用同一 snk 签名，否则 CS0281。
+		     与 ACadSharp.Formats.Tests 共用 ../ACadSharp.Formats.snk。 -->
+		<SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>..\ACadSharp.Formats.snk</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<None Include="..\..\README.md">
-			<Pack>True</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
+		<ProjectReference Include="..\..\..\ACadSharp\src\ACadSharp\ACadSharp.csproj" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' != 'Release'">
-		<ProjectReference Include="..\ACadSharp\src\ACadSharp\ACadSharp.csproj" />
+	<!-- [GDB2CAD PATCH] PNG 光栅输出端（FullImageEngine.Png.cs）已改为纯托管 RasterCanvas
+	     （RGBA 软件光栅化 + PNG 编码 ZLibStream，零外部依赖，无 SkiaSharp）。
+	     SHX bigfont（Hztxt.shx 等 CJK）按 GBK 双字节取字形码需要 936 编码；
+	     与 ACadSharp fork（DwgSummaryInfoReader）同策略，保留 CodePages。 -->
+	<ItemGroup>
+		<PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Release'">
-		<PackageReference Include="ACadSharp" Version="3.8.*" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-		<PackageReference Include="System.Memory" Version="4.6.*" />
-		<PackageReference Include="System.Text.Json" Version="10.0.*" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-		<PackageReference Include="System.Memory" Version="4.6.*" />
-		<PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.*" />
-		<PackageReference Include="System.Text.Json" Version="10.0.*" />
+	<!-- [GDB2CAD PATCH] Json 导出器不参与编译：上游 Json 转换器依赖 NuGet ACadSharp 3.8 的
+	     AecEntities 命名空间与 public CadDocumentBuilder，本地 fork 3.7.16 均无（T4 不需要 JSON 导出）。 -->
+	<ItemGroup>
+		<Compile Remove="Json\**" />
+		<None Include="Json\**" />
 	</ItemGroup>
 
 </Project>
