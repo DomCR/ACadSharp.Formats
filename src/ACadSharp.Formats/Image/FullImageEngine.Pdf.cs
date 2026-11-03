@@ -72,8 +72,14 @@ internal partial class ImageEngine
             // 背景（默认黑色；WhiteBackground=true 时白色；TransparentBackground=true 时省略背景填充=透明页）
             if (!_transparentBg)
                 CsAscii(cs, (_whiteBg ? "1 1 1" : "0 0 0") + " rg\n0 0 " + F(_w) + " " + F(_h) + " re f\n");
-            foreach (var ent in AllEntities())
-                EmitEntityPdf(cs, ent, null, 1.0, 7, null, null, _ltScale); // 顶层无 INSERT 上下文，ByBlock 兜底白/实线
+            ReportProgress("extents", 0.08, 0, 0, $"画布 {F(_w)}×{F(_h)} @1:1×{F(_opt.OutputZoom)}");
+            var _ents = AllEntities().ToList();
+            int _entTotal = _ents.Count;
+            for (int _ei = 0; _ei < _entTotal; _ei++)
+            {
+                ReportEntityProgress("render", _ei, _entTotal, _ents[_ei]);
+                EmitEntityPdf(cs, _ents[_ei], null, 1.0, 7, null, null, _ltScale); // 顶层无 INSERT 上下文，ByBlock 兜底白/实线
+            }
             byte[] content = cs.ToArray();
 
             // R20b：字体对象/资源表必须在内容流生成【之后】定稿——字体（如宋体 SimSun）是内容流生成
@@ -230,6 +236,7 @@ internal partial class ImageEngine
             if (!string.IsNullOrEmpty(pdfDir) && !Directory.Exists(pdfDir))
                 Directory.CreateDirectory(pdfDir);
             File.WriteAllBytes(outPath, file.ToArray());
+            ReportProgress("done", 1.0, _entTotal, _entTotal, outPath);
             string fontNote = _pdfFonts.HasFont
                 ? "已内嵌 " + _pdfFonts.Count + " 个中文字体（" + string.Join(", ", _pdfFonts.UsedFontNames()) + "）"
                 : "无中文字体（中文显示为?）";

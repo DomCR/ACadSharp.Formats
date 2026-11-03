@@ -72,6 +72,16 @@ public class ImageConfiguration
 	public int PngTileSize { get; set; } = 4096;
 
 	/// <summary>
+	/// PNG 分块触发阈值（像素，仅 PNG 光栅端生效；2026-11-02 cad2png 需求）。
+	/// 整幅 1:1×OutputZoom 画布任一维 &gt; 该值时，即使未达 16384 单侧 / 3200 万总像素位图上限，
+	/// 也按 <see cref="PngTileSize"/> 网格分块流式输出（不缩小、不丢清晰度）。
+	/// 0（默认）= 保持既有语义（仅超位图上限才分块，GDB2CAD 宿主行为不变）；
+	/// cad2png CLI 默认传 4096（「默认 4096×4096，大于这个尺寸的文件自动分片」）。
+	/// 注意：仅触发分块，不改变合并路径（合并仍仅由位图上限触发，见 <see cref="PngMergeToSingle"/>）。
+	/// </summary>
+	public int PngTileThreshold { get; set; } = 0;
+
+	/// <summary>
 	/// PNG 分块时是否启用「点精灵缓存」（仅 PNG 光栅端、且 PngMergeToSingle=false 分块时生效）。
 	/// ⚠️ 默认 false（实测结论）：点符号在瓦片内本就稀疏，精灵缓存把点按 4r 包围盒渲染成大张离屏精灵，
 	///   blit 时按【精灵面积】逐像素遍历（99% 透明像素也要过一遍），开销远大于直接重画小字形。
@@ -123,6 +133,18 @@ public class ImageConfiguration
 	public Action<string> Log { get; set; }
 
 	/// <summary>
+	/// 转换进度回调（2026-11-02 cad2png/cad2svg 进度监控需求）。
+	/// null（默认）= 禁用，既有宿主行为逐字节不变。
+	/// phase 取值：extents（范围计算）/ render（单图逐实体渲染）/ tile（瓦片或条带渲染）/
+	/// save（写盘）/ done（完成）；Percent 0.0~1.0 为整幅总体进度；Current/Total 为当前粒度计数
+	/// （实体数或瓦片数）；Message 为人类可读说明（实体类型/瓦片坐标等）。
+	/// ⚠️ 回调在导出线程（主线程）内联触发，应保持轻量（UI 宿主请自行 BeginInvoke 切主线程）。
+	/// 与 <see cref="ACadSharp.Formats.GeoJson.GeoJsonConfiguration"/>.Progress 同一 <see cref="ImageProgress"/> 类型，
+	/// PNG/SVG/PDF/GeoJSON 四种导出统一可监控。
+	/// </summary>
+	public Action<ImageProgress> Progress { get; set; }
+
+	/// <summary>
 	/// 支持文件名（如 "AAA.SHX"、"simhei.ttf"，大小写不敏感）→ 绝对路径 的解析器。
 	/// 由调用方提供搜索目录（Support\fonts + 祖先目录等）；找不到返回 null（调用方按回退策略处理）。
 	/// </summary>
@@ -134,11 +156,12 @@ public class ImageConfiguration
 	public int ArcPrecision { get; set; } = 256;
 
 	/// <summary>
-	/// 变宽折线（逐顶点宽度 + bulge 弧段）偏移轮廓构建器（R13 架构拆分：算法在宿主程序
-	/// GDB2CAD.Core.TaperOffset，本包只含渲染契约 <see cref="ITaperOffsetBuilder"/>）。
-	/// null 时含 bulge 的锥形折线回退逐顶点弦偏移（R10 前行为）。
+	/// 变宽折线（逐顶点宽度 + bulge 弧段）偏移轮廓构建器（契约 <see cref="ITaperOffsetBuilder"/>）。
+	/// 默认 <c>new <see cref="TaperOffset"/>()</c>（本包内置实现，算法自 GDB2CAD.Core.TaperOffset
+	/// 逐字节移植）：含 bulge 的锥形/云形折线按真实弧偏移渲染，宿主无需注入。
+	/// 显式赋 <c>null</c> 回退逐顶点弦偏移（R10 前行为）。
 	/// </summary>
-	public ITaperOffsetBuilder TaperOffsetBuilder { get; set; }
+	public ITaperOffsetBuilder TaperOffsetBuilder { get; set; } = new TaperOffset();
 
 	internal void Notify(string message)
 	{

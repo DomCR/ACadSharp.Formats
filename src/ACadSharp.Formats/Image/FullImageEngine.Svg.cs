@@ -2740,8 +2740,14 @@ internal partial class ImageEngine
         _svgDefs = new StringBuilder();
         _hatchGradSeq = 0;
         _skippedCounts.Clear();
-        foreach (var ent in AllEntities())
-            EmitEntitySvg(sb, ent, null, 1.0, 7, null, null, _ltScale); // 顶层无 INSERT 上下文，ByBlock 兜底白/实线
+        ReportProgress("extents", 0.08, 0, 0, $"画布 {F(_w)}×{F(_h)} @1:1×{F(_opt.OutputZoom)}");
+        var _ents = AllEntities().ToList();
+        int _entTotal = _ents.Count;
+        for (int _ei = 0; _ei < _entTotal; _ei++)
+        {
+            ReportEntityProgress("render", _ei, _entTotal, _ents[_ei]);
+            EmitEntitySvg(sb, _ents[_ei], null, 1.0, 7, null, null, _ltScale); // 顶层无 INSERT 上下文，ByBlock 兜底白/实线
+        }
 
         if (_svgDefs.Length > 0)
         {
@@ -2754,6 +2760,7 @@ internal partial class ImageEngine
         if (!string.IsNullOrEmpty(svgDir) && !Directory.Exists(svgDir))
             Directory.CreateDirectory(svgDir);
         File.WriteAllText(outPath, sb.ToString(), Encoding.UTF8);
+        ReportProgress("done", 1.0, _entTotal, _entTotal, outPath);
         _log($"✅  SVG 已生成：{outPath}（画板 {F(_w * _opt.OutputZoom)}×{F(_h * _opt.OutputZoom)}，1:1 内容放大 {F(_opt.OutputZoom)} 倍）");
         LogSkipped("SVG");
         return new ImageExportResult
@@ -5391,8 +5398,9 @@ internal partial class ImageEngine
     // 变为外半径 r+hw 的正确填充圆盘（内环 r−hw≤0 时退化为圆心点，evenodd 仍填实）。
     // 角顶点取入/出边切向的平分线法向（直线边=弦向，弧边=端点切向），宽度沿弧线性插值。
     // 无 bulge 时返回 false → 调用方走原逐顶点弦路径（输出保持不变，像素 parity 不受影响）。
-    // 几何核心经 ITaperOffsetBuilder 注入（R13 架构拆分：算法在宿主程序 GDB2CAD.Core.TaperOffset，
-    // 本包只含渲染契约）；builder 为 null 时回退弦路径（R10 前行为）。本方法只负责实体类型
+    // 几何核心经 ITaperOffsetBuilder 注入：默认本包内置 TaperOffset（算法自
+    // GDB2CAD.Core.TaperOffset 逐字节移植，2026-11-03 起收敛到本包单一实现），
+    // 宿主显式置 null 时回退弦路径（R10 前行为）。本方法只负责实体类型
     // 适配 + 变换应用（逐点顺序与旧实现一致 → 输出字节不变）。
     private static (bool Ok, List<(double X, double Y)> Left, List<(double X, double Y)> Right) TryBuildTaperOffset(LwPolyline pl, double[] sw, double[] ew, Transform2D tr, ITaperOffsetBuilder builder)
     {

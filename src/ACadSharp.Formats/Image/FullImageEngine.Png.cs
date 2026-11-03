@@ -451,7 +451,12 @@ internal partial class ImageEngine
         int fullH = (int)Math.Ceiling(_h * zoom);
         if (fullW < 1) fullW = 1;
         if (fullH < 1) fullH = 1;
-        bool overLimit = fullW > PngMaxSide || fullH > PngMaxSide || (long)fullW * fullH > PngMaxPixels;
+        bool overBitmap = fullW > PngMaxSide || fullH > PngMaxSide || (long)fullW * fullH > PngMaxPixels;
+        // 分块触发阈值（cad2png 2026-11-02）：画布任一维 > PngTileThreshold 时也走分块（如 4096，
+        // 「大于 4096×4096 自动分片」）；0 = 旧语义（仅超位图上限才分块）。
+        bool overThreshold = _opt.PngTileThreshold > 0 && (fullW > _opt.PngTileThreshold || fullH > _opt.PngTileThreshold);
+        bool overLimit = overBitmap || overThreshold;
+        ReportProgress("extents", 0.08, 0, 0, $"画布 {fullW}×{fullH}px @1:1×{F(zoom)}");
 
         // WMTS 缩放级别 z：多级导出时由宿主传 0-based 级别索引（WmtsZ）；单级导出回退 OutputZoom 四舍五入（旧行为）。
         int zLevel = _opt.WmtsZ ?? Math.Max(0, (int)Math.Round(zoom));
@@ -464,7 +469,7 @@ internal partial class ImageEngine
             return WritePngSingle(outPath, fullW, fullH, zoom, false);
 
         // ② 超限 + 合并（PngMergeToSingle=true）且未强制网格：合并为 1 张
-        if (overLimit && _opt.PngMergeToSingle && !forceTiles)
+        if (overBitmap && _opt.PngMergeToSingle && !forceTiles)
         {
             if (_opt.PngMergeScaleToCap)
             {
@@ -484,7 +489,7 @@ internal partial class ImageEngine
             return WritePngNativeMerge(outPath, fullW, fullH, zoom);
         }
 
-        // ③ 超限分块 / 强制网格（单图也按 1×1 瓦片）：按网格流式输出（每张 ≤ 单侧/总像素上限，不缩小、不丢清晰度）
+        // ③ 超限/超阈值分块 / 强制网格（单图也按 1×1 瓦片）：按网格流式输出（每张 ≤ 单侧/总像素上限，不缩小、不丢清晰度）
         return WritePngTiled(outPath, fullW, fullH, zoom, zLevel);
     }
 
@@ -507,10 +512,16 @@ internal partial class ImageEngine
         _pngKy = k;
         _tileOx = 0; _tileOy = 0; // 单图：无瓦片偏移，整幅画布从像素原点起
 
-        foreach (var ent in AllEntities())
-            EmitEntityPng(ent, null, 1.0, 7, null, null, _ltScale); // 顶层无 INSERT 上下文，ByBlock 兜底白/实线
+        var _ents = AllEntities().ToList();
+        int _entTotal = _ents.Count;
+        for (int _ei = 0; _ei < _entTotal; _ei++)
+        {
+            ReportEntityProgress("render", _ei, _entTotal, _ents[_ei]);
+            EmitEntityPng(_ents[_ei], null, 1.0, 7, null, null, _ltScale); // 顶层无 INSERT 上下文，ByBlock 兜底白/实线
+        }
         LogSkipped("PNG");
 
+        ReportProgress("save", 0.92, _entTotal, _entTotal, "写盘");
         long _saveT0 = Environment.TickCount64;
         bool _saveOk = rc.SavePng(outPath);
         _pngSaveUs += Environment.TickCount64 - _saveT0;
@@ -521,6 +532,7 @@ internal partial class ImageEngine
             return new ImageExportResult { Success = false };
         }
         _rc = null;
+        ReportProgress("done", 1.0, _entTotal, _entTotal, outPath);
         _log($"✅  PNG 已生成{(merged ? "（合并单图）" : "")}：{outPath}（画板 {W}×{H}px，1:1 内容放大 {F(k)} 倍（统一比例，与 SVG/PDF 一致）{(_transparentBg ? "，透明背景" : "")}）");
         LogPerfSummary();
         return PngResult(W, H, merged, k, System.Array.Empty<ImageTile>());
@@ -636,6 +648,8 @@ internal partial class ImageEngine
         int seq = 0;
         int emptySkipped = 0; // 无数据瓦片跳过计数（SkipEmptyTiles，2026-11-02 用户要求）
         long renderedPairs = 0, totalPairs = 0;
+        int _tileTotal = cols * rows;
+        int _tileDone = 0;
         for (int cy = 0; cy < rows; cy++)
         {
             int y0 = cy * tile;
@@ -645,6 +659,8 @@ internal partial class ImageEngine
                 int x0 = cx * tile;
                 int tw = Math.Min(tile, fullW - x0);
                 if (tw < 1 || th < 1) continue;
+                _tileDone++;
+                ReportProgress("tile", 0.10 + 0.87 * _tileDone / (double)Math.Max(1, _tileTotal), _tileDone, _tileTotal, $"tile({cx},{cy}) 渲染");
 
                 var rc = new RasterCanvas(tw, th);
                 ClearPngBg(rc);
@@ -714,9 +730,11 @@ internal partial class ImageEngine
 
         LogSkipped("PNG");
         // 等待全部后台编码写盘完成；任一失败 → 整次导出失败（保持原同步失败语义）
+        ReportProgress("save", 0.97, _tileDone, _tileTotal, "编码写盘");
         if (!FlushPngSaves())
             return new ImageExportResult { Success = false };
         double skipPct = totalPairs > 0 ? 100.0 * (1 - (double)renderedPairs / totalPairs) : 0;
+        ReportProgress("done", 1.0, seq, seq, $"{seq} 张瓦片");
         _log($"✅  PNG 分块输出：{seq} 张瓦片（{cols} 列 × {rows} 行网格，单瓦片 ≤ {tile}×{tile}px，整幅 {fullW}×{fullH} @1:1×{F(zoom)}，OGC WMTS 命名 tiles/{zLevel}/{{row}}/{{col}}.png{(_transparentBg ? "，透明背景" : "")}{(emptySkipped > 0 ? $"，跳过 {emptySkipped} 张无数据空白瓦片（未输出）" : "")}）");
         _log($"   空间剔除：{seq} 瓦片共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%；编码写盘已后台并行）");
         if (PerfOn)
@@ -797,6 +815,12 @@ internal partial class ImageEngine
         int pw = maxTw, ph = maxTh;
         long renderedPairs = 0, totalPairs = 0;
         long subStripCount = 0, bandCount = 0;
+        int _mergeTotal = 0;
+        for (int _ry = 0; _ry < rows; _ry++)
+        {
+            int _thy = Math.Min(tile, fullH - _ry * tile);
+            _mergeTotal += (int)((_thy + bandH - 1) / (long)bandH) * cols;
+        }
         for (int cy = 0; cy < rows && !writer.Failed; cy++)
         {
             int y0 = cy * tile;
@@ -843,6 +867,7 @@ internal partial class ImageEngine
                     if (PerfOn && subStripCount < 8)
                         _log($"   [diag] sub{subStripCount + 1}({cx},{cy},{ky}) post-write: GC≈{GC.GetTotalMemory(false) / 1024 / 1024}MB / {MemProbe()}");
                     subStripCount++;
+                    ReportProgress("tile", 0.10 + 0.87 * subStripCount / (double)Math.Max(1, _mergeTotal), (int)subStripCount, _mergeTotal, $"strip({cx},{cy},{ky}) 行流并入");
                     if (cx == cols - 1)
                     {
                         bandCount++;
@@ -868,6 +893,7 @@ internal partial class ImageEngine
             return new ImageExportResult { Success = false };
         }
         double skipPct = totalPairs > 0 ? 100.0 * (1 - (double)renderedPairs / totalPairs) : 0;
+        ReportProgress("done", 1.0, (int)subStripCount, _mergeTotal, outPath);
         _log($"✅  PNG 原分辨率流式合并（不缩小）：{outPath}（整幅 {fullW}×{fullH} @1:1×{F(zoom)}，{cols}×{rows} 瓦片网格 × 子条带 {bandH}px 高共 {bandCount} 条带 {subStripCount} 块行流并入，合并内存≈条带累积缓冲 {(long)fullW * bandH * 4 / 1024 / 1024}MB + 渲染画布(瓦片宽×至子条带底，单张复用)（与整幅总高无关）{(_transparentBg ? "，透明背景" : "")}）");
         _log($"   空间剔除：{subStripCount} 子条带共需 {totalPairs} 次实体渲染，实际 {renderedPairs} 次（剔除 {skipPct:F0}%）");
         if (PerfOn)
